@@ -7,18 +7,17 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        // Esta es la fuente digital que hace que los números queden guapos
+        // La fuente digital "JetBrains Mono"
         mono: ['"JetBrains Mono"', 'monospace'],
         sans: ['system-ui', 'sans-serif'],
       },
       colors: {
-        // AQUÍ ESTÁ LA CLAVE: Definimos los colores "Race"
-        // Si no tienes esto, la web se verá blanca y rota.
-        'race-dark': '#0b0c15',   // Fondo negro profundo
-        'race-card': '#151621',   // Fondo de las tarjetas
-        'neon-blue': '#00f2ff',   // Azul Cian Eléctrico
-        'neon-green': '#00ff9d',  // Verde Semáforo
-        'neon-red': '#ff0055',    // Rojo Alerta
+        // AQUÍ ESTÁ LA SOLUCIÓN: Definimos los colores NUEVOS
+        'race-dark': '#0b0c15',   // El fondo negro que falta
+        'race-card': '#151621',   // El fondo de las tarjetas
+        'neon-blue': '#00f2ff',   // Cian eléctrico
+        'neon-green': '#00ff9d',  // Verde
+        'neon-red': '#ff0055',    // Rojo
         'neon-amber': '#ffb700',  // Ámbar
       },
       boxShadow: {
