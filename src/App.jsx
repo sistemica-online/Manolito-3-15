@@ -6,11 +6,11 @@ import {
 } from 'recharts';
 import { 
   Scale, Heart, Zap, Activity, MessageSquare, 
-  Trophy, Flame, Timer
+  Trophy, Timer
 } from 'lucide-react';
 
 // --- CONFIGURACIÓN ---
-// ¡PEGA AQUÍ TU ENLACE!
+// 👇👇👇 ¡PEGA TU ENLACE AQUÍ! 👇👇👇
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQT2VlO6DOSyVSKjDYMHALcg9UgHQyRSFZ-SJFJqh_1_VQ51Ul4_NEUagRLAi9xj5C8hHcC2NPQ0L1K/pub?output=tsv"; 
 
 // OBJETIVOS
@@ -34,51 +34,43 @@ const predictTime = (currentEF) => {
   return `${h}h ${m.toString().padStart(2, '0')}m`;
 };
 
-// --- COMPONENTES VISUALES ROBUSTOS (Colores Incrustados) ---
+// --- COMPONENTES VISUALES CON ESTILO FORZADO ---
 
-const StatCard = ({ title, value, unit, icon: Icon, theme, subtext, progress }) => {
-  // Definimos los temas con códigos de color explícitos para no depender de tailwind.config
-  const themes = {
-    blue:   { text: "text-[#00f2ff]", border: "border-[#00f2ff]", bg: "bg-[#00f2ff]" }, // Cyan Neón
-    green:  { text: "text-[#00ff9d]", border: "border-[#00ff9d]", bg: "bg-[#00ff9d]" }, // Verde Neón
-    red:    { text: "text-[#ff0055]", border: "border-[#ff0055]", bg: "bg-[#ff0055]" }, // Rojo Neón
-    amber:  { text: "text-[#ffb700]", border: "border-[#ffb700]", bg: "bg-[#ffb700]" }, // Ambar Neón
-    purple: { text: "text-[#d946ef]", border: "border-[#d946ef]", bg: "bg-[#d946ef]" }, // Púrpura
-  };
-
-  const activeTheme = themes[theme] || themes.blue;
-
+const StatCard = ({ title, value, unit, icon: Icon, colorHex, subtext, progress }) => {
   return (
-    <div className="relative overflow-hidden bg-[#151621] border border-slate-800 rounded-xl p-5 hover:border-slate-600 transition-all duration-300">
-      {/* Icono de fondo marca de agua */}
-      <div className={`absolute top-0 right-0 p-2 opacity-10 ${activeTheme.text}`}>
+    <div style={{ 
+      backgroundColor: '#151621', 
+      border: '1px solid #1e293b', 
+      borderRadius: '12px', 
+      padding: '20px',
+      position: 'relative',
+      overflow: 'hidden'
+    }}>
+      {/* Icono de fondo */}
+      <div style={{ position: 'absolute', top: 0, right: 0, padding: '8px', opacity: 0.1, color: colorHex }}>
           <Icon size={40} />
       </div>
       
-      <div className="flex items-center gap-2 mb-3">
-        <Icon size={16} className="text-slate-400" />
-        <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{title}</h3>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+        <Icon size={16} color="#94a3b8" />
+        <h3 style={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#64748b' }}>{title}</h3>
       </div>
       
-      <div className="relative z-10">
-        <div className="flex items-baseline gap-1">
-          <span className="text-3xl font-mono font-bold text-white tracking-tighter shadow-black drop-shadow-md">
+      <div style={{ position: 'relative', zIndex: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+          <span style={{ fontSize: '30px', fontWeight: 'bold', color: 'white', fontFamily: 'monospace' }}>
             {value}
           </span>
-          <span className="text-[10px] font-bold text-slate-500 uppercase">{unit}</span>
+          <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase' }}>{unit}</span>
         </div>
         
-        {/* Barra de Progreso - Ahora usamos style directo para asegurar el color */}
         {progress !== undefined && (
-          <div className="w-full h-1.5 bg-[#0b0c15] rounded-full mt-3 overflow-hidden border border-slate-800">
-            <div 
-              className={`h-full transition-all duration-1000 ${activeTheme.bg}`} 
-              style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
-            />
+          <div style={{ width: '100%', height: '6px', backgroundColor: '#0b0c15', borderRadius: '99px', marginTop: '12px', overflow: 'hidden', border: '1px solid #1e293b' }}>
+            <div style={{ height: '100%', width: `${Math.min(100, Math.max(0, progress))}%`, backgroundColor: colorHex, transition: 'width 1s' }} />
           </div>
         )}
         
-        {subtext && <p className={`text-[10px] mt-2 font-mono opacity-80 ${activeTheme.text}`}>{subtext}</p>}
+        {subtext && <p style={{ fontSize: '10px', marginTop: '8px', fontFamily: 'monospace', opacity: 0.8, color: colorHex }}>{subtext}</p>}
       </div>
     </div>
   );
@@ -88,30 +80,30 @@ const MisterMessage = ({ message }) => {
   if (!message) return null;
   const msgLower = message.toLowerCase();
   
-  // Lógica directa de colores
-  let styles = { borderColor: "#64748b", color: "#cbd5e1", shadow: "none" }; // Default
+  let color = "#cbd5e1"; // default grey
+  let borderColor = "#64748b";
 
   if (msgLower.match(/bien|cojonudo|sigue|perfecto|vamos/)) {
-    styles = { borderColor: "#00ff9d", color: "#00ff9d", shadow: "0 0 30px rgba(0,255,157,0.15)" };
+    color = "#00ff9d"; borderColor = "#00ff9d";
   } else if (msgLower.match(/cuidado|ojo|aviso|atento|vigila/)) {
-    styles = { borderColor: "#ffb700", color: "#ffb700", shadow: "0 0 30px rgba(255,183,0,0.15)" };
+    color = "#ffb700"; borderColor = "#ffb700";
   } else if (msgLower.match(/mal|parar|freno|dolor|lesion|stop/)) {
-    styles = { borderColor: "#ff0055", color: "#ff0055", shadow: "0 0 30px rgba(255,0,85,0.2)" };
+    color = "#ff0055"; borderColor = "#ff0055";
   }
 
   return (
-    <div 
-      className="mt-8 relative bg-[#151621] border-l-4 rounded-r-xl p-6 transition-all"
-      style={{ borderColor: styles.borderColor, boxShadow: styles.shadow }}
-    >
-      <div className="flex items-center gap-3 mb-2">
-        <MessageSquare size={16} style={{ color: styles.color }} />
-        <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Feedback Técnico</h3>
+    <div style={{ 
+      marginTop: '32px', 
+      backgroundColor: '#151621', 
+      borderLeft: `4px solid ${borderColor}`, 
+      borderRadius: '0 12px 12px 0', 
+      padding: '24px'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+        <MessageSquare size={16} color={color} />
+        <h3 style={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.2em', color: '#64748b' }}>Feedback Técnico</h3>
       </div>
-      <p 
-        className="text-xl md:text-2xl font-mono font-bold italic leading-snug"
-        style={{ color: styles.color }}
-      >
+      <p style={{ fontSize: '20px', fontFamily: 'monospace', fontWeight: 'bold', fontStyle: 'italic', color: color }}>
         "{message}"
       </p>
     </div>
@@ -161,32 +153,30 @@ export default function App() {
     });
   }, []);
 
-  if (loading) return <div className="h-screen bg-[#0b0c15] flex items-center justify-center text-[#00f2ff] font-mono text-xs animate-pulse">SINCRONIZANDO TELEMETRÍA...</div>;
-  if (error) return <div className="h-screen bg-[#0b0c15] flex items-center justify-center text-[#ff0055] font-mono">{error}</div>;
+  if (loading) return <div style={{ height: '100vh', backgroundColor: '#0b0c15', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#00f2ff', fontFamily: 'monospace' }}>SINCRONIZANDO TELEMETRÍA...</div>;
+  if (error) return <div style={{ height: '100vh', backgroundColor: '#0b0c15', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ff0055', fontFamily: 'monospace' }}>{error}</div>;
 
   const last = data[data.length - 1] || {};
   
-  // Semáforos Lógicos
+  // Lógica Semáforo
   const isRhrGood = last.FC_Reposo < 45;
   const isSoleusGood = last.GCT_Balance_Izq >= 49.0;
   
-  // Progresos
   const daysLeft = daysUntil(TARGET_DATE);
   const predictedTime = predictTime(last.Eficiencia_EF);
+  
   const startWeight = 78.0; 
   const weightProgress = ((startWeight - last.Peso) / (startWeight - TARGET_WEIGHT)) * 100;
   const efProgress = ((last.Eficiencia_EF - 1.30) / (TARGET_EF - 1.30)) * 100;
 
-  // Tooltip
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
-        <div className="bg-[#151621]/90 backdrop-blur border border-slate-700 p-3 rounded text-xs shadow-xl font-mono">
-          <p className="text-slate-400 mb-2 border-b border-slate-700 pb-1">{label}</p>
+        <div style={{ backgroundColor: 'rgba(21, 22, 33, 0.95)', border: '1px solid #334155', padding: '12px', borderRadius: '4px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)' }}>
+          <p style={{ color: '#94a3b8', marginBottom: '8px', fontSize: '12px', fontFamily: 'monospace' }}>{label}</p>
           {payload.map((entry, index) => (
-            <div key={index} className="flex items-center justify-between gap-4 mb-1 text-slate-200">
-                <span>{entry.name}:</span>
-                <span className="font-bold text-white">{entry.value}</span>
+            <div key={index} style={{ color: entry.color, fontSize: '12px', marginBottom: '4px' }}>
+              {entry.name}: <span style={{ color: 'white', fontWeight: 'bold' }}>{entry.value}</span>
             </div>
           ))}
         </div>
@@ -196,71 +186,53 @@ export default function App() {
   };
 
   return (
-    // FONDO FORZADO AQUÍ (bg-[#0b0c15])
-    <div className="min-h-screen bg-[#0b0c15] text-slate-200 font-sans selection:bg-[#00f2ff] selection:text-black pb-20">
+    // ESTILOS EN LÍNEA: ESTO FUERZA EL FONDO NEGRO SÍ O SÍ
+    <div style={{ minHeight: '100vh', backgroundColor: '#0b0c15', color: '#e2e8f0', fontFamily: 'sans-serif', paddingBottom: '80px' }}>
       
-      {/* HEADER & COUNTDOWN */}
-      <div className="border-b border-slate-800 bg-[#0b0c15]/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto p-4 md:px-8 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="text-center md:text-left">
-            <h1 className="text-3xl md:text-4xl font-black tracking-tighter text-white italic leading-none">
-              MANOLITO <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00f2ff] to-[#00ff9d]">3:15</span>
+      {/* HEADER */}
+      <div style={{ borderBottom: '1px solid #1e293b', backgroundColor: 'rgba(11, 12, 21, 0.8)', position: 'sticky', top: 0, zIndex: 50, backdropFilter: 'blur(4px)' }}>
+        <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '16px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+          <div>
+            <h1 style={{ fontSize: '36px', fontWeight: '900', fontStyle: 'italic', lineHeight: 1, color: 'white', margin: 0 }}>
+              MANOLITO <span style={{ color: '#00f2ff' }}>3:15</span>
             </h1>
-            <p className="text-[10px] text-slate-500 font-bold tracking-widest mt-1">SISTEMA MAPOMA '26</p>
+            <p style={{ fontSize: '10px', color: '#64748b', fontWeight: 'bold', letterSpacing: '0.1em', marginTop: '4px' }}>SISTEMA MAPOMA '26</p>
           </div>
           
-          <div className="flex gap-2">
-             <div className="bg-[#151621] border border-slate-800 rounded px-4 py-2 text-center min-w-[100px]">
-                <div className="text-[10px] text-slate-500 font-bold">RACE DAY</div>
-                <div className="text-2xl font-mono font-bold text-white">{daysLeft}</div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+             <div style={{ backgroundColor: '#151621', border: '1px solid #1e293b', borderRadius: '4px', padding: '8px 16px', textAlign: 'center', minWidth: '100px' }}>
+                <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 'bold' }}>RACE DAY</div>
+                <div style={{ fontSize: '24px', fontFamily: 'monospace', fontWeight: 'bold', color: 'white' }}>{daysLeft}</div>
              </div>
-             <div className="bg-[#151621] border border-slate-800 rounded px-4 py-2 text-center min-w-[120px]">
-                <div className="text-[10px] text-slate-500 font-bold">PREDICCIÓN</div>
-                <div className="text-2xl font-mono font-bold text-white">{predictedTime}</div>
+             <div style={{ backgroundColor: '#151621', border: '1px solid #1e293b', borderRadius: '4px', padding: '8px 16px', textAlign: 'center', minWidth: '120px' }}>
+                <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 'bold' }}>PREDICCIÓN</div>
+                <div style={{ fontSize: '24px', fontFamily: 'monospace', fontWeight: 'bold', color: 'white' }}>{predictedTime}</div>
              </div>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
+      <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '32px', display: 'flex', flexDirection: 'column', gap: '32px' }}>
         
         {/* KPI DASHBOARD */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard 
-            title="Peso Actual" value={last.Peso} unit="kg" icon={Scale} 
-            theme="blue"
-            subtext={`Meta: ${TARGET_WEIGHT}kg`}
-            progress={weightProgress} 
-          />
-          <StatCard 
-            title="FC Reposo" value={last.FC_Reposo} unit="ppm" icon={Heart} 
-            theme={isRhrGood ? "green" : "amber"}
-            subtext={isRhrGood ? "Bradicardia OK" : "Vigilar fatiga"}
-          />
-          <StatCard 
-            title="Eficiencia (EF)" value={last.Eficiencia_EF} unit="pts" icon={Zap} 
-            theme="purple"
-            subtext={`Meta: ${TARGET_EF} pts`}
-            progress={efProgress}
-          />
-          <StatCard 
-            title="Sóleo (GCT)" value={last.GCT_Balance_Izq} unit="%" icon={Activity} 
-            theme={isSoleusGood ? "green" : "red"}
-            subtext={isSoleusGood ? "Simetría OK" : "Descompensado"}
-          />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px' }}>
+          <StatCard title="Peso Actual" value={last.Peso} unit="kg" icon={Scale} colorHex="#00f2ff" subtext={`Meta: ${TARGET_WEIGHT}kg`} progress={weightProgress} />
+          <StatCard title="FC Reposo" value={last.FC_Reposo} unit="ppm" icon={Heart} colorHex={isRhrGood ? "#00ff9d" : "#ffb700"} subtext={isRhrGood ? "Bradicardia OK" : "Vigilar fatiga"} />
+          <StatCard title="Eficiencia (EF)" value={last.Eficiencia_EF} unit="pts" icon={Zap} colorHex="#d946ef" subtext={`Meta: ${TARGET_EF} pts`} progress={efProgress} />
+          <StatCard title="Sóleo (GCT)" value={last.GCT_Balance_Izq} unit="%" icon={Activity} colorHex={isSoleusGood ? "#00ff9d" : "#ff0055"} subtext={isSoleusGood ? "Simetría OK" : "Descompensado"} />
         </div>
 
         <MisterMessage message={last.Mensaje_Mister} />
 
         {/* CHARTS */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
           
           {/* GRÁFICA 1 */}
-          <div className="bg-[#151621] border border-slate-800 rounded-xl p-6">
-            <h3 className="text-slate-400 text-xs font-bold uppercase mb-6 flex items-center gap-2">
-              <Zap size={14} className="text-[#00f2ff]"/> Eficiencia
+          <div style={{ backgroundColor: '#151621', border: '1px solid #1e293b', borderRadius: '12px', padding: '24px' }}>
+            <h3 style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Zap size={14} color="#00f2ff"/> Eficiencia
             </h3>
-            <div className="h-64 w-full">
+            <div style={{ height: '256px', width: '100%' }}>
               <ResponsiveContainer>
                 <AreaChart data={data}>
                   <defs>
@@ -280,11 +252,11 @@ export default function App() {
           </div>
 
           {/* GRÁFICA 2 */}
-          <div className="bg-[#151621] border border-slate-800 rounded-xl p-6">
-            <h3 className="text-slate-400 text-xs font-bold uppercase mb-6 flex items-center gap-2">
-              <Trophy size={14} className="text-[#00ff9d]"/> Carga vs Pulso
+          <div style={{ backgroundColor: '#151621', border: '1px solid #1e293b', borderRadius: '12px', padding: '24px' }}>
+            <h3 style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Trophy size={14} color="#00ff9d"/> Carga vs Pulso
             </h3>
-            <div className="h-64 w-full">
+            <div style={{ height: '256px', width: '100%' }}>
               <ResponsiveContainer>
                 <ComposedChart data={data}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.1} vertical={false} />
