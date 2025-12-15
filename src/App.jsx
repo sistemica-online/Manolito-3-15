@@ -12,7 +12,7 @@ import {
 // 1. Ve a tu Google Sheet -> Archivo -> Compartir -> Publicar en la web.
 // 2. Selecciona "Valores separados por comas (.csv)".
 // 3. Pega el enlace aquí abajo entre las comillas:
-const SHEET_URL = "https://docs.google.com/spreadsheets/d/1yYItBDMh2NHzYK7_N_adFzK9lQsgJ4rQGjbO3CQ1DK8/edit?usp=drive_link"; 
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQT2VlO6DOSyVSKjDYMHALcg9UgHQyRSFZ-SJFJqh_1_VQ51Ul4_NEUagRLAi9xj5C8hHcC2NPQ0L1K/pubhtml"; 
 
 // --- COMPONENTES UI (Kpi Card & Feedback) ---
 const Card = ({ title, value, unit, icon: Icon, trendColor, subtext, borderColor = "border-slate-700" }) => (
