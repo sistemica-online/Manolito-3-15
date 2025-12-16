@@ -26,10 +26,10 @@ const STYLES = {
 const processFitData = (records) => {
   if (!records || records.length === 0) return null;
 
-  // 1. Filtrado de seguridad: eliminamos registros sin distancia o corruptos
+  // 1. Filtrado de seguridad
   const cleanRecords = records.filter(r => r.distance != null && !isNaN(r.distance));
   
-  // 2. Downsampling inteligente para rendimiento
+  // 2. Downsampling
   const step = cleanRecords.length > 2000 ? Math.floor(cleanRecords.length / 1000) : 1;
   
   const chartData = [];
@@ -39,13 +39,18 @@ const processFitData = (records) => {
   cleanRecords.forEach((r, i) => {
     if (r.heart_rate) { totalHR += r.heart_rate; countHR++; }
     
-    // Guardamos la distancia máxima para calcular los Ticks del eje X luego
-    const dKm = r.distance / 1000;
+    // CORRECCIÓN CRÍTICA: r.distance YA VIENE EN KM gracias a la config del parser.
+    // No dividimos por 1000.
+    let dKm = r.distance; 
+    
+    // Safety check: Si por alguna razón viniera en metros (ej > 100km para una sesión corta), ajustamos
+    // Pero confiamos en la config 'lengthUnit: km'
+    
     if (dKm > maxDistVal) maxDistVal = dKm;
 
     if (i % step === 0) {
       chartData.push({
-        dist: parseFloat(dKm.toFixed(3)), // Eje X numérico
+        dist: parseFloat(dKm.toFixed(3)), 
         hr: r.heart_rate,
         cadence: r.cadence,
         gct: r.stance_time_balance, 
@@ -55,14 +60,18 @@ const processFitData = (records) => {
     }
   });
 
-  // 3. Generador de Ticks para el Eje X (0, 1, 2, 3...)
-  // Esto fuerza a que salgan los números enteros en la gráfica
+  // 3. Generador de Ticks (Enteros) para el Eje X
+  // Si maxDist es 5.3km, generamos [0, 1, 2, 3, 4, 5, 6]
   const xTicks = [];
-  for (let i = 0; i <= Math.ceil(maxDistVal); i++) {
+  const limit = Math.ceil(maxDistVal);
+  // Evitamos generar 100 ticks si es una ultra (máximo 20 ticks)
+  const tickStep = limit > 20 ? Math.ceil(limit / 20) : 1;
+  
+  for (let i = 0; i <= limit; i += tickStep) {
     xTicks.push(i);
   }
 
-  // Cálculo de Desacople
+  // Desacople
   const mid = Math.floor(cleanRecords.length / 2);
   const h1 = cleanRecords.slice(0, mid).reduce((a,b) => a + (b.heart_rate||0), 0) / mid;
   const h2 = cleanRecords.slice(mid).reduce((a,b) => a + (b.heart_rate||0), 0) / (cleanRecords.length - mid);
@@ -70,11 +79,11 @@ const processFitData = (records) => {
 
   return {
     chartData,
-    xTicks, // Devolvemos los ticks calculados
+    xTicks,
     avgHR: countHR ? Math.round(totalHR / countHR) : 0,
     decoupling,
     recordsCount: cleanRecords.length,
-    totalDist: maxDistVal * 1000
+    totalDist: maxDistVal // Ya está en km
   };
 };
 
@@ -97,7 +106,7 @@ export default function App() {
       const fitParser = new FitParser({
         force: true, 
         speedUnit: 'km/h', 
-        lengthUnit: 'km',
+        lengthUnit: 'km', // IMPORTANTE: Esto nos da km directos
         elapsedRecordField: true
       });
 
@@ -112,7 +121,6 @@ export default function App() {
         const processed = processFitData(records);
         setDashboardData(processed);
 
-        // Generar CSV
         let csv = "Timestamp,Distance_km,HeartRate_bpm,Cadence_spm,GCT_Balance_Left,Vert_Osc_mm\n";
         records.forEach(r => {
            const t = r.timestamp ? new Date(r.timestamp).toISOString() : "";
@@ -192,7 +200,7 @@ export default function App() {
                   <Activity size={12} /> DISTANCIA
                 </div>
                 <div style={{ fontSize: '24px', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                  {(dashboardData.totalDist / 1000).toFixed(2)} <span style={{fontSize:'12px', color:STYLES.textDim}}>km</span>
+                  {dashboardData.totalDist.toFixed(2)} <span style={{fontSize:'12px', color:STYLES.textDim}}>km</span>
                 </div>
               </div>
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
@@ -232,12 +240,11 @@ export default function App() {
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
                       
-                      {/* EJE X FORZADO A MOSTRAR ENTEROS */}
                       <XAxis 
                         dataKey="dist" 
                         type="number" 
                         domain={[0, 'dataMax']}
-                        ticks={dashboardData.xTicks} // <-- AQUÍ ESTÁ EL TRUCO
+                        ticks={dashboardData.xTicks}
                         stroke={STYLES.textDim} 
                         fontSize={12}
                         tickLine={false} 
