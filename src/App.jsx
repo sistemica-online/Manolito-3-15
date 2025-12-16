@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { 
   UploadCloud, Activity, Heart, Zap, Footprints, FileText, 
-  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Search
+  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Search, Bug
 } from 'lucide-react';
 
 // --- ESTILOS "M55 DARK" ---
@@ -90,27 +90,19 @@ const calculateMetrics = (records) => {
     if (r.heart_rate) { totalHR += r.heart_rate; countHR++; }
     if (r.vertical_oscillation && r.vertical_oscillation !== 0) hasVertOsc = true;
 
-    // --- DETECTIVE DE POTENCIA (NUEVO) ---
+    // --- DETECTIVE DE POTENCIA ---
+    // Intentamos capturar cualquier cosa, pero aquí solo visualizamos si encontramos algo.
+    // La lógica real dependerá de lo que encontremos en el modo forense.
     let pwrVal = r.power;
-    
-    // 1. Si no está en 'power', buscamos en alias comunes
-    if (pwrVal === undefined || pwrVal === null) {
-        if (r.running_power) pwrVal = r.running_power;
-    }
-    
-    // 2. Si sigue vacío, buscamos en los campos de desarrollador (Connect IQ)
     if ((pwrVal === undefined || pwrVal === null) && r.developerFields) {
-        // Buscamos cualquier clave que contenga 'power' o 'watt'
         for (const key in r.developerFields) {
             const keyName = key.toLowerCase();
             if (keyName.includes('power') || keyName.includes('watt')) {
                 pwrVal = r.developerFields[key];
-                break; // Encontrado!
+                break; 
             }
         }
     }
-
-    // Flag de disponibilidad
     if (pwrVal && pwrVal > 0) hasPower = true;
 
     let dKm = r.distance; 
@@ -162,7 +154,7 @@ const calculateMetrics = (records) => {
         gct: r.stance_time_balance, 
         vertOsc: r.vertical_oscillation,
         vRatio: vertRatio && vertRatio < 20 ? parseFloat(vertRatio.toFixed(2)) : null,
-        pwr: pwrVal, // Usamos el valor detectado
+        pwr: pwrVal, 
         pace: paceMinKm > 0 && paceMinKm < 20 ? parseFloat(paceMinKm.toFixed(2)) : null, 
         stride: strideLen > 0 && strideLen < 3 ? parseFloat(strideLen.toFixed(2)) : null
       });
@@ -202,7 +194,10 @@ export default function App() {
   const [gpxData, setGpxData] = useState(null); 
   const [csvContent, setCsvContent] = useState(null);
   const [fileName, setFileName] = useState("");
-  const [debugMsg, setDebugMsg] = useState(""); // Para ver si detectamos power
+  
+  // --- ESTADOS FORENSES ---
+  const [debugRawKeys, setDebugRawKeys] = useState([]); // Claves encontradas en devFields
+  const [debugSample, setDebugSample] = useState("");   // Muestra de un registro
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
@@ -212,7 +207,7 @@ export default function App() {
     setStatus('PARSING');
     setData(null);
     setGpxData(null);
-    setDebugMsg("");
+    setDebugRawKeys([]);
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -224,19 +219,28 @@ export default function App() {
         if (error) { setStatus('ERROR'); return; }
 
         const records = resultData.records || resultData.record || [];
+        
+        // --- FORENSE: Buscar qué demonios hay en developerFields ---
+        let foundKeys = new Set();
+        let sampleDevField = null;
+
+        // Miramos los primeros 100 registros para ver qué claves aparecen
+        for (let i = 0; i < Math.min(records.length, 100); i++) {
+            if (records[i].developerFields) {
+                Object.keys(records[i].developerFields).forEach(k => foundKeys.add(k));
+                if (!sampleDevField) sampleDevField = records[i].developerFields;
+            }
+        }
+        setDebugRawKeys(Array.from(foundKeys));
+        if (sampleDevField) setDebugSample(JSON.stringify(sampleDevField));
+
         const processed = calculateMetrics(records);
         setData(processed);
-        
-        if (processed.availability.hasPower) {
-            setDebugMsg("⚡ Potencia detectada y activada.");
-        } else {
-            setDebugMsg("⚠️ No se encontró canal de Potencia (Ni nativo ni Connect IQ).");
-        }
 
-        // CSV Enriquecido con Potencia Detectada
+        // CSV
         let csv = "Timestamp,Dist_km,HR,Cadence_SPM,GCT_Left,VertOsc_mm,VertRatio_Pct,Stride_m,Power_W,Speed_mps\n";
         
-        // Helper para extraer potencia en el CSV igual que en la gráfica
+        // Helper para CSV usando la lógica de "cualquier cosa que suene a power"
         const getPwr = (r) => {
              let p = r.power;
              if (!p && r.running_power) p = r.running_power;
@@ -361,10 +365,27 @@ export default function App() {
         {status === 'SUCCESS' && data && (
           <div style={{ animation: 'fadeIn 0.5s', display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
-            {/* DEBUG MESSAGE */}
-            <div style={{ textAlign: 'center', marginBottom: '10px', fontSize: '12px', color: data.availability.hasPower ? STYLES.neonGreen : STYLES.neonRed }}>
-                {debugMsg}
-            </div>
+            {/* ZONA DE INFORME FORENSE (SOLO SI SE DETECTAN CAMPOS EXTRAÑOS) */}
+            {debugRawKeys.length > 0 ? (
+                <div style={{ backgroundColor: '#2e2e10', border: '1px solid #ffff00', padding: '15px', borderRadius: '8px', color: '#ffff00', fontFamily: 'monospace', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontWeight: 'bold' }}>
+                        <Bug size={16} /> INFORME FORENSE: CAMPOS OCULTOS ENCONTRADOS
+                    </div>
+                    <div style={{ marginBottom: '8px' }}>
+                        He encontrado estos campos en 'developerFields':<br/>
+                        <span style={{ color: 'white' }}>{debugRawKeys.join(', ')}</span>
+                    </div>
+                    <div>
+                        Muestra de datos (primer registro con datos):<br/>
+                        <span style={{ color: '#ccc' }}>{debugSample}</span>
+                    </div>
+                </div>
+            ) : (
+                <div style={{ textAlign: 'center', fontSize: '12px', color: STYLES.textDim }}>
+                   ℹ️ No se encontraron 'developerFields' (Campos Connect IQ). El archivo parece estándar.
+                </div>
+            )}
+
 
             {/* KPI GRID */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
@@ -416,9 +437,13 @@ export default function App() {
              
             <ChartSection title="Longitud de Zancada" icon={Ruler} dataset={data.chartData} dataKey="stride" color={STYLES.neonOrange} unit="m" domain={[0.5, 1.5]} />
 
-            {/* GRÁFICA DE POTENCIA ACTIVADA */}
-            {data.availability.hasPower && (
-              <ChartSection title="Potencia (Watts)" icon={Zap} dataset={data.chartData} dataKey="pwr" color={STYLES.neonAmber} unit="w" />
+            {/* GRÁFICA DE POTENCIA (INTENTO VISUALIZAR SI SE ACTIVÓ EL FLAG, O SI NO) */}
+            {data.availability.hasPower ? (
+              <ChartSection title="Potencia Detectada (Watts)" icon={Zap} dataset={data.chartData} dataKey="pwr" color={STYLES.neonAmber} unit="w" />
+            ) : (
+               <div style={{ padding: '20px', border: `1px solid ${STYLES.border}`, borderRadius: '12px', textAlign: 'center', color: STYLES.textDim, fontSize: '12px' }}>
+                 No se pudo visualizar la potencia. Revisa el Informe Forense arriba.
+               </div>
             )}
 
             <div style={{ marginTop: '20px', padding: '20px', backgroundColor: 'rgba(0, 242, 255, 0.05)', borderRadius: '12px', border: `1px solid ${STYLES.neonBlue}` }}>
