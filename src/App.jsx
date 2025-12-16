@@ -26,40 +26,55 @@ const STYLES = {
 const processFitData = (records) => {
   if (!records || records.length === 0) return null;
 
-  // Downsampling para rendimiento visual (aprox 1000 puntos por gráfica)
-  const step = records.length > 2000 ? Math.floor(records.length / 1000) : 1;
+  // 1. Filtrado de seguridad: eliminamos registros sin distancia o corruptos
+  const cleanRecords = records.filter(r => r.distance != null && !isNaN(r.distance));
+  
+  // 2. Downsampling inteligente para rendimiento
+  const step = cleanRecords.length > 2000 ? Math.floor(cleanRecords.length / 1000) : 1;
   
   const chartData = [];
   let totalHR = 0, countHR = 0;
+  let maxDistVal = 0;
   
-  records.forEach((r, i) => {
+  cleanRecords.forEach((r, i) => {
     if (r.heart_rate) { totalHR += r.heart_rate; countHR++; }
+    
+    // Guardamos la distancia máxima para calcular los Ticks del eje X luego
+    const dKm = r.distance / 1000;
+    if (dKm > maxDistVal) maxDistVal = dKm;
 
     if (i % step === 0) {
       chartData.push({
-        // CORRECCIÓN CLAVE: Distancia como número real para que el eje X sea continuo
-        dist: parseFloat((r.distance / 1000).toFixed(3)), 
+        dist: parseFloat(dKm.toFixed(3)), // Eje X numérico
         hr: r.heart_rate,
         cadence: r.cadence,
-        gct: r.stance_time_balance, // Solo Balance Izquierdo (lo que importa)
+        gct: r.stance_time_balance, 
         vertOsc: r.vertical_oscillation,
         alt: r.altitude
       });
     }
   });
 
-  // Cálculo rápido de Desacople
-  const mid = Math.floor(records.length / 2);
-  const h1 = records.slice(0, mid).reduce((a,b) => a + (b.heart_rate||0), 0) / mid;
-  const h2 = records.slice(mid).reduce((a,b) => a + (b.heart_rate||0), 0) / (records.length - mid);
+  // 3. Generador de Ticks para el Eje X (0, 1, 2, 3...)
+  // Esto fuerza a que salgan los números enteros en la gráfica
+  const xTicks = [];
+  for (let i = 0; i <= Math.ceil(maxDistVal); i++) {
+    xTicks.push(i);
+  }
+
+  // Cálculo de Desacople
+  const mid = Math.floor(cleanRecords.length / 2);
+  const h1 = cleanRecords.slice(0, mid).reduce((a,b) => a + (b.heart_rate||0), 0) / mid;
+  const h2 = cleanRecords.slice(mid).reduce((a,b) => a + (b.heart_rate||0), 0) / (cleanRecords.length - mid);
   const decoupling = h1 > 0 ? (((h2 - h1) / h1) * 100).toFixed(1) : 0;
 
   return {
     chartData,
+    xTicks, // Devolvemos los ticks calculados
     avgHR: countHR ? Math.round(totalHR / countHR) : 0,
     decoupling,
-    recordsCount: records.length,
-    totalDist: records[records.length-1]?.distance || 0
+    recordsCount: cleanRecords.length,
+    totalDist: maxDistVal * 1000
   };
 };
 
@@ -97,6 +112,7 @@ export default function App() {
         const processed = processFitData(records);
         setDashboardData(processed);
 
+        // Generar CSV
         let csv = "Timestamp,Distance_km,HeartRate_bpm,Cadence_spm,GCT_Balance_Left,Vert_Osc_mm\n";
         records.forEach(r => {
            const t = r.timestamp ? new Date(r.timestamp).toISOString() : "";
@@ -114,7 +130,6 @@ export default function App() {
     saveAs(blob, `M55_RAW_${fileName}.csv`);
   };
 
-  // Tooltip Inteligente con Km exacto
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
@@ -155,7 +170,6 @@ export default function App() {
 
       <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '20px' }}>
 
-        {/* DROPZONE */}
         {status !== 'SUCCESS' && (
           <div style={{ 
             border: `2px dashed ${STYLES.border}`, borderRadius: '16px', backgroundColor: STYLES.card,
@@ -168,11 +182,10 @@ export default function App() {
           </div>
         )}
 
-        {/* DASHBOARD */}
         {status === 'SUCCESS' && dashboardData && (
           <div style={{ animation: 'fadeIn 0.5s' }}>
             
-            {/* KPIs */}
+            {/* KPI GRID */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '32px' }}>
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
                 <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -200,7 +213,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* GRÁFICAS LIMPIAS */}
+            {/* GRÁFICAS */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
               {/* GRÁFICA 1: PULSO */}
@@ -219,15 +232,14 @@ export default function App() {
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
                       
-                      {/* EJE X NUMÉRICO INTELIGENTE */}
+                      {/* EJE X FORZADO A MOSTRAR ENTEROS */}
                       <XAxis 
                         dataKey="dist" 
                         type="number" 
-                        domain={['dataMin', 'dataMax']} 
-                        tickCount={10} 
-                        tickFormatter={(v) => v.toFixed(1)} 
+                        domain={[0, 'dataMax']}
+                        ticks={dashboardData.xTicks} // <-- AQUÍ ESTÁ EL TRUCO
                         stroke={STYLES.textDim} 
-                        fontSize={10} 
+                        fontSize={12}
                         tickLine={false} 
                         axisLine={false} 
                       />
@@ -240,7 +252,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* GRÁFICA 2: SÓLEO (VERSIÓN SIMPLE) */}
+              {/* GRÁFICA 2: SÓLEO */}
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
                 <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Footprints size={16} color={STYLES.neonGreen} /> SIMETRÍA (GCT BALANCE IZQ)
@@ -253,29 +265,23 @@ export default function App() {
                       <XAxis 
                         dataKey="dist" 
                         type="number" 
-                        domain={['dataMin', 'dataMax']} 
-                        tickCount={10} 
-                        tickFormatter={(v) => v.toFixed(1)} 
+                        domain={[0, 'dataMax']}
+                        ticks={dashboardData.xTicks}
                         stroke={STYLES.textDim} 
-                        fontSize={10} 
+                        fontSize={12} 
                         tickLine={false} 
                         axisLine={false} 
                       />
 
                       <YAxis domain={[47, 53]} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
                       <Tooltip content={<CustomTooltip />} />
-                      
-                      {/* Zonas Críticas */}
-                      <ReferenceLine y={50} stroke="#fff" strokeDasharray="3 3" opacity={0.5} label={{ value: 'Centro (50%)', position: 'right', fill: '#fff', fontSize: 10 }} />
-                      <ReferenceLine y={49} stroke={STYLES.neonRed} strokeDasharray="5 5" label={{ value: 'Alarma Sóleo (<49%)', position: 'right', fill: STYLES.neonRed, fontSize: 10 }} />
+                      <ReferenceLine y={50} stroke="#fff" strokeDasharray="3 3" opacity={0.5} />
+                      <ReferenceLine y={49} stroke={STYLES.neonRed} strokeDasharray="5 5" />
                       
                       <Line type="monotone" dataKey="gct" stroke={STYLES.neonGreen} strokeWidth={2} dot={false} name="GCT Izq" unit="%" />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
-                <p style={{ fontSize: '10px', color: STYLES.textDim, marginTop: '10px' }}>
-                  * Si la línea verde cruza la línea roja discontinua hacia abajo, hay fatiga estructural en el lado izquierdo.
-                </p>
               </div>
 
               {/* GRÁFICA 3: CADENCIA */}
@@ -291,11 +297,10 @@ export default function App() {
                       <XAxis 
                         dataKey="dist" 
                         type="number" 
-                        domain={['dataMin', 'dataMax']} 
-                        tickCount={10} 
-                        tickFormatter={(v) => v.toFixed(1)} 
+                        domain={[0, 'dataMax']}
+                        ticks={dashboardData.xTicks}
                         stroke={STYLES.textDim} 
-                        fontSize={10} 
+                        fontSize={12} 
                         tickLine={false} 
                         axisLine={false} 
                       />
