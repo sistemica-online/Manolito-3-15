@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { 
   UploadCloud, Activity, Heart, Zap, Footprints, FileText, 
-  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map
+  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent
 } from 'lucide-react';
 
 // --- ESTILOS "M55 DARK" ---
@@ -22,6 +22,7 @@ const STYLES = {
   neonAmber: '#ffb700',  
   neonPurple: '#d946ef', 
   neonOrange: '#f97316', 
+  neonMagenta: '#ec4899', // Nuevo color para Ratio Vertical
   grid: '#334155'
 };
 
@@ -114,25 +115,32 @@ const calculateMetrics = (records) => {
     }
 
     // --- CORRECCIÓN CADENCIA ---
-    // Garmin suele dar RPM (una pierna). Si es < 120, asumimos que es RPM y multiplicamos x2
     let realCadence = r.cadence;
     if (realCadence > 0 && realCadence < 120) {
         realCadence = realCadence * 2;
     }
 
-    // Zancada basada en cadencia real
+    // Zancada (m)
     let strideLen = 0;
     if (realCadence > 0 && avgSpeedMps > 0) {
       strideLen = (avgSpeedMps * 60) / realCadence;
+    }
+
+    // --- NUEVO: RATIO VERTICAL (%) ---
+    // (Oscilación mm / (Zancada m * 1000)) * 100
+    let vertRatio = null;
+    if (hasVertOsc && strideLen > 0 && r.vertical_oscillation > 0) {
+        vertRatio = (r.vertical_oscillation / (strideLen * 1000)) * 100;
     }
 
     if (i % step === 0) {
       chartData.push({
         dist: parseFloat(dKm.toFixed(3)), 
         hr: r.heart_rate,
-        cadence: realCadence, // Usamos la corregida
+        cadence: realCadence, 
         gct: r.stance_time_balance, 
         vertOsc: r.vertical_oscillation,
+        vRatio: vertRatio && vertRatio < 20 ? parseFloat(vertRatio.toFixed(2)) : null, // Filtro de seguridad
         pwr: r.power,
         pace: paceMinKm > 0 && paceMinKm < 20 ? parseFloat(paceMinKm.toFixed(2)) : null, 
         stride: strideLen > 0 && strideLen < 3 ? parseFloat(strideLen.toFixed(2)) : null
@@ -196,15 +204,18 @@ export default function App() {
         const processed = calculateMetrics(records);
         setData(processed);
 
-        // CSV Base: IMPORTANTE exportar la cadencia corregida también o raw?
-        // Dejamos RAW para el analista, o corregida? Mejor corregida para que la IA no se líe.
-        let csv = "Timestamp,Dist_km,HR,Cadence_SPM,GCT_Left,VertOsc_mm,Power_W,Speed_mps\n";
+        // CSV Base Enriquecido
+        let csv = "Timestamp,Dist_km,HR,Cadence_SPM,GCT_Left,VertOsc_mm,VertRatio_Pct,Stride_m,Power_W,Speed_mps\n";
         records.forEach(r => {
+           // Recalculamos al vuelo para el CSV
            let cad = r.cadence;
-           if (cad > 0 && cad < 120) cad = cad * 2; // Corrección en CSV también
+           if (cad > 0 && cad < 120) cad = cad * 2;
+           let speedMps = r.speed ? (r.speed * 1000 / 3600) : 0;
+           let stride = (cad > 0 && speedMps > 0) ? (speedMps * 60 / cad) : 0;
+           let vRatio = (stride > 0 && r.vertical_oscillation > 0) ? (r.vertical_oscillation / (stride * 1000) * 100) : 0;
 
            const t = r.timestamp ? new Date(r.timestamp).toISOString() : "";
-           csv += `${t},${r.distance},${r.heart_rate},${cad},${r.stance_time_balance},${r.vertical_oscillation},${r.power},${r.speed}\n`;
+           csv += `${t},${r.distance},${r.heart_rate},${cad},${r.stance_time_balance},${r.vertical_oscillation},${vRatio.toFixed(2)},${stride.toFixed(2)},${r.power},${r.speed}\n`;
         });
         setCsvContent(csv);
         setStatus('SUCCESS');
@@ -308,6 +319,7 @@ export default function App() {
         {status === 'SUCCESS' && data && (
           <div style={{ animation: 'fadeIn 0.5s', display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
+            {/* KPI GRID */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
                 <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>DISTANCIA</div>
@@ -346,10 +358,13 @@ export default function App() {
             <ChartSection title="Ritmo (min/km)" icon={Gauge} dataset={data.chartData} dataKey="pace" color={STYLES.neonBlue} unit="min/km" domain={[4, 10]} yReversed={true} />
             <ChartSection title="Frecuencia Cardíaca" icon={Heart} dataset={data.chartData} dataKey="hr" color={STYLES.neonRed} unit="ppm" domain={['dataMin - 5', 'auto']} type="area" />
             <ChartSection title="Simetría Sóleo (GCT Izq)" icon={Footprints} dataset={data.chartData} dataKey="gct" color={STYLES.neonGreen} unit="%" domain={[47, 53]} />
-            <ChartSection title="Cadencia" icon={Activity} dataset={data.chartData} dataKey="cadence" color={STYLES.text} unit="spm" domain={[140, 200]} />
+            <ChartSection title="Cadencia (SPM)" icon={Activity} dataset={data.chartData} dataKey="cadence" color={STYLES.text} unit="spm" domain={[140, 200]} />
             
             {data.availability.hasVertOsc && (
-              <ChartSection title="Oscilación Vertical" icon={ArrowRight} dataset={data.chartData} dataKey="vertOsc" color={STYLES.neonPurple} unit="mm" />
+              <>
+                 <ChartSection title="Oscilación Vertical" icon={ArrowRight} dataset={data.chartData} dataKey="vertOsc" color={STYLES.neonPurple} unit="mm" />
+                 <ChartSection title="Ratio Vertical (%)" icon={Percent} dataset={data.chartData} dataKey="vRatio" color={STYLES.neonMagenta} unit="%" domain={[0, 15]} />
+              </>
             )}
              
             <ChartSection title="Longitud de Zancada" icon={Ruler} dataset={data.chartData} dataKey="stride" color={STYLES.neonOrange} unit="m" domain={[0.5, 1.5]} />
