@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "file-saver": "^2.0.5",
+    "fit-file-parser": "^2.1.0",
     "lucide-react": "^0.292.0",
     "papaparse": "^5.5.3",
     "react": "^18.2.0",
