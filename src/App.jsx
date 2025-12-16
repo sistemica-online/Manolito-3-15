@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import FitParser from 'fit-file-parser'; 
 import { saveAs } from 'file-saver';     
 import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, ReferenceLine
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area
 } from 'recharts';
 import { 
   UploadCloud, Activity, Heart, Zap, Footprints, FileText, 
@@ -27,7 +27,7 @@ const STYLES = {
 
 // --- UTILIDADES GEOMÉTRICAS (GPX) ---
 const getDistanceFromLatLonInKm = (lat1, lon1, lat2, lon2) => {
-  const R = 6371; // Radio tierra km
+  const R = 6371; 
   const dLat = (lat2 - lat1) * (Math.PI / 180);
   const dLon = (lon2 - lon1) * (Math.PI / 180);
   const a = 
@@ -37,7 +37,6 @@ const getDistanceFromLatLonInKm = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
-// --- PARSER DE GPX NATIVO ---
 const parseGpxString = (gpxStr) => {
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(gpxStr, "text/xml");
@@ -52,7 +51,6 @@ const parseGpxString = (gpxStr) => {
     const lon = parseFloat(pt.getAttribute("lon"));
     const ele = parseFloat(pt.getElementsByTagName("ele")[0]?.textContent || 0);
     
-    // Calcular distancia acumulada
     if (i > 0) {
       const prev = trkpts[i-1];
       const prevLat = parseFloat(prev.getAttribute("lat"));
@@ -60,7 +58,6 @@ const parseGpxString = (gpxStr) => {
       totalDist += getDistanceFromLatLonInKm(prevLat, prevLon, lat, lon);
     }
 
-    // Downsampling visual (cada ~50m) para no saturar la gráfica
     if (i % 5 === 0 || i === trkpts.length - 1) {
         elevationData.push({
             dist: parseFloat(totalDist.toFixed(3)),
@@ -70,7 +67,6 @@ const parseGpxString = (gpxStr) => {
   }
   return elevationData;
 };
-
 
 // --- LOGICA MATEMÁTICA AVANZADA FIT ---
 const calculateMetrics = (records) => {
@@ -117,16 +113,24 @@ const calculateMetrics = (records) => {
        paceMinKm = 16.666666 / avgSpeedMps;
     }
 
+    // --- CORRECCIÓN CADENCIA ---
+    // Garmin suele dar RPM (una pierna). Si es < 120, asumimos que es RPM y multiplicamos x2
+    let realCadence = r.cadence;
+    if (realCadence > 0 && realCadence < 120) {
+        realCadence = realCadence * 2;
+    }
+
+    // Zancada basada en cadencia real
     let strideLen = 0;
-    if (r.cadence > 0 && avgSpeedMps > 0) {
-      strideLen = (avgSpeedMps * 60) / r.cadence;
+    if (realCadence > 0 && avgSpeedMps > 0) {
+      strideLen = (avgSpeedMps * 60) / realCadence;
     }
 
     if (i % step === 0) {
       chartData.push({
         dist: parseFloat(dKm.toFixed(3)), 
         hr: r.heart_rate,
-        cadence: r.cadence,
+        cadence: realCadence, // Usamos la corregida
         gct: r.stance_time_balance, 
         vertOsc: r.vertical_oscillation,
         pwr: r.power,
@@ -156,7 +160,6 @@ const calculateMetrics = (records) => {
   };
 };
 
-// Formateador de Ritmo
 const formatPace = (val) => {
   if (!val) return "--";
   const min = Math.floor(val);
@@ -167,7 +170,7 @@ const formatPace = (val) => {
 export default function App() {
   const [status, setStatus] = useState('IDLE'); 
   const [data, setData] = useState(null);
-  const [gpxData, setGpxData] = useState(null); // Estado para el GPX
+  const [gpxData, setGpxData] = useState(null); 
   const [csvContent, setCsvContent] = useState(null);
   const [fileName, setFileName] = useState("");
 
@@ -193,11 +196,15 @@ export default function App() {
         const processed = calculateMetrics(records);
         setData(processed);
 
-        // CSV Base
-        let csv = "Timestamp,Dist_km,HR,Cadence,GCT_Left,VertOsc_mm,Power_W,Speed_mps\n";
+        // CSV Base: IMPORTANTE exportar la cadencia corregida también o raw?
+        // Dejamos RAW para el analista, o corregida? Mejor corregida para que la IA no se líe.
+        let csv = "Timestamp,Dist_km,HR,Cadence_SPM,GCT_Left,VertOsc_mm,Power_W,Speed_mps\n";
         records.forEach(r => {
+           let cad = r.cadence;
+           if (cad > 0 && cad < 120) cad = cad * 2; // Corrección en CSV también
+
            const t = r.timestamp ? new Date(r.timestamp).toISOString() : "";
-           csv += `${t},${r.distance},${r.heart_rate},${r.cadence},${r.stance_time_balance},${r.vertical_oscillation},${r.power},${r.speed}\n`;
+           csv += `${t},${r.distance},${r.heart_rate},${cad},${r.stance_time_balance},${r.vertical_oscillation},${r.power},${r.speed}\n`;
         });
         setCsvContent(csv);
         setStatus('SUCCESS');
@@ -242,7 +249,6 @@ export default function App() {
     return null;
   };
 
-  // Componente Gráfica
   const ChartSection = ({ title, icon: Icon, dataset, dataKey, color, unit, domain, type="line", yReversed=false }) => (
     <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
       <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -277,7 +283,6 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh', backgroundColor: STYLES.bg, color: STYLES.text, fontFamily: 'sans-serif', paddingBottom: '40px' }}>
       
-      {/* HEADER */}
       <div style={{ borderBottom: `1px solid ${STYLES.border}`, padding: '20px', backgroundColor: 'rgba(11,12,21,0.9)', position: 'sticky', top: 0, zIndex: 50, backdropFilter: 'blur(5px)' }}>
         <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
@@ -303,7 +308,6 @@ export default function App() {
         {status === 'SUCCESS' && data && (
           <div style={{ animation: 'fadeIn 0.5s', display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
-            {/* KPI GRID */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
                 <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>DISTANCIA</div>
@@ -319,7 +323,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* ZONA DE CARGA GPX (Si no hay altitud) */}
             {!gpxData && (
                 <div style={{ border: `1px dashed ${STYLES.border}`, borderRadius: '12px', padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', position: 'relative', cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.02)' }}>
                     <input type="file" accept=".gpx" onChange={handleGpxUpload} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }} />
@@ -332,9 +335,6 @@ export default function App() {
                 </div>
             )}
 
-            {/* GRÁFICAS */}
-            
-            {/* 1. PERFIL DE ELEVACIÓN (GPX o FIT) */}
             {gpxData ? (
                  <ChartSection title="Perfil de Elevación (Fuente: GPX)" icon={Mountain} dataset={gpxData} dataKey="alt" color={STYLES.text} unit="m" type="area" />
             ) : (
@@ -343,21 +343,19 @@ export default function App() {
                  </div>
             )}
 
-            {/* 2. RITMO */}
             <ChartSection title="Ritmo (min/km)" icon={Gauge} dataset={data.chartData} dataKey="pace" color={STYLES.neonBlue} unit="min/km" domain={[4, 10]} yReversed={true} />
-
-            {/* 3. PULSO */}
             <ChartSection title="Frecuencia Cardíaca" icon={Heart} dataset={data.chartData} dataKey="hr" color={STYLES.neonRed} unit="ppm" domain={['dataMin - 5', 'auto']} type="area" />
-
-            {/* 4. SIMETRÍA */}
             <ChartSection title="Simetría Sóleo (GCT Izq)" icon={Footprints} dataset={data.chartData} dataKey="gct" color={STYLES.neonGreen} unit="%" domain={[47, 53]} />
-
-            {/* 5. CADENCIA */}
-            <ChartSection title="Cadencia" icon={Activity} dataset={data.chartData} dataKey="cadence" color={STYLES.text} unit="spm" />
-
-            {/* OTROS (Si existen) */}
+            <ChartSection title="Cadencia" icon={Activity} dataset={data.chartData} dataKey="cadence" color={STYLES.text} unit="spm" domain={[140, 200]} />
+            
             {data.availability.hasVertOsc && (
               <ChartSection title="Oscilación Vertical" icon={ArrowRight} dataset={data.chartData} dataKey="vertOsc" color={STYLES.neonPurple} unit="mm" />
+            )}
+             
+            <ChartSection title="Longitud de Zancada" icon={Ruler} dataset={data.chartData} dataKey="stride" color={STYLES.neonOrange} unit="m" domain={[0.5, 1.5]} />
+
+            {data.availability.hasPower && (
+              <ChartSection title="Potencia" icon={Zap} dataset={data.chartData} dataKey="pwr" color={STYLES.neonAmber} unit="w" />
             )}
 
             <div style={{ marginTop: '20px', padding: '20px', backgroundColor: 'rgba(0, 242, 255, 0.05)', borderRadius: '12px', border: `1px solid ${STYLES.neonBlue}` }}>
