@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { 
   UploadCloud, Activity, Heart, Zap, Footprints, FileText, 
-  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Timer, Maximize2, X, ZoomOut
+  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Timer, Maximize2, X, RotateCcw
 } from 'lucide-react';
 
 // --- ESTILOS "M55 DARK" ---
@@ -228,7 +228,7 @@ export default function App() {
     return null;
   };
 
-  // --- MODAL DE PANTALLA COMPLETA CON "TRUE ZOOM" ---
+  // --- MODAL DE PANTALLA COMPLETA CON ZOOM REAL ---
   const FullScreenModal = ({ chartConfig, data, xTicks, onClose }) => {
     const isMobile = window.innerWidth < 768;
     
@@ -245,7 +245,6 @@ export default function App() {
             return;
         }
 
-        // Ordenar coordenadas si se seleccionó al revés
         let min = refAreaLeft;
         let max = refAreaRight;
         if (min > max) [min, max] = [max, min];
@@ -279,34 +278,39 @@ export default function App() {
             
             <div style={{ ...mobileLandscapeStyle, display: 'flex', flexDirection: 'column', padding: '20px', boxSizing: 'border-box', backgroundColor: '#000' }}>
                 
+                {/* CABECERA DEL MODAL */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                    <h2 style={{ color: chartConfig.color, margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <chartConfig.icon /> {chartConfig.title} 
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                        <h2 style={{ color: chartConfig.color, margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <chartConfig.icon /> {chartConfig.title} 
+                        </h2>
                         
+                        {/* BOTÓN DE RESET VISIBLE */}
                         {left !== 'dataMin' && (
                              <button 
                                 onClick={zoomOut}
                                 style={{ 
-                                    backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, color: STYLES.neonBlue, 
-                                    padding: '5px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px',
-                                    display: 'flex', alignItems: 'center', gap: '5px'
+                                    backgroundColor: 'rgba(255, 255, 255, 0.1)', border: '1px solid white', color: 'white', 
+                                    padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold',
+                                    display: 'flex', alignItems: 'center', gap: '6px', animation: 'fadeIn 0.3s'
                                 }}
                              >
-                                <ZoomOut size={14} /> ALEJAR ZOOM
+                                <RotateCcw size={14} /> RESET ZOOM
                              </button>
                         )}
-                    </h2>
+                    </div>
 
                     <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: '10px' }}>
                         <X size={32} />
                     </button>
                 </div>
                 
-                <div style={{ textAlign: 'left', color: STYLES.textDim, fontSize: '12px', marginBottom: '8px' }}>
-                    {isMobile ? "Arrastra con el dedo sobre la gráfica para hacer ZOOM." : "Haz clic y arrastra para hacer ZOOM."}
+                {/* INSTRUCCIONES CLARAS */}
+                <div style={{ textAlign: 'left', color: STYLES.textDim, fontSize: '12px', marginBottom: '8px', paddingLeft: '4px' }}>
+                    🖱️ Arrastra para ZOOM &nbsp;&nbsp; | &nbsp;&nbsp; ⚡ Doble Clic para RESET
                 </div>
 
-                <div style={{ flex: 1, minHeight: 0, userSelect: 'none' }}>
+                <div style={{ flex: 1, minHeight: 0, userSelect: 'none', cursor: 'crosshair' }}>
                     <ResponsiveContainer width="100%" height="100%">
                     {chartConfig.type === 'area' ? (
                         <AreaChart 
@@ -314,6 +318,7 @@ export default function App() {
                             onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel)}
                             onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel)}
                             onMouseUp={zoom}
+                            onDoubleClick={zoomOut} // DOBLE CLIC PARA SALIR
                         >
                             <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
                             
@@ -341,7 +346,6 @@ export default function App() {
                             
                             <Area type="monotone" dataKey={chartConfig.dataKey} stroke={chartConfig.color} fill={chartConfig.color} fillOpacity={0.2} strokeWidth={3} name={chartConfig.title} unit={chartConfig.unit} animationDuration={300} />
                             
-                            {/* ZONA VISUAL DE SELECCIÓN */}
                             {refAreaLeft && refAreaRight ? (
                                 <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill={STYLES.text} fillOpacity={0.1} />
                             ) : null}
@@ -353,6 +357,7 @@ export default function App() {
                             onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel)}
                             onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel)}
                             onMouseUp={zoom}
+                            onDoubleClick={zoomOut} // DOBLE CLIC PARA SALIR
                         >
                             <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
                             
@@ -384,7 +389,6 @@ export default function App() {
                             
                             <Line type="monotone" dataKey={chartConfig.dataKey} stroke={chartConfig.color} strokeWidth={3} dot={false} name={chartConfig.title} unit={chartConfig.unit} animationDuration={300} />
                             
-                            {/* ZONA VISUAL DE SELECCIÓN */}
                             {refAreaLeft && refAreaRight ? (
                                 <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill={STYLES.text} fillOpacity={0.1} />
                             ) : null}
@@ -474,7 +478,6 @@ export default function App() {
         {status === 'SUCCESS' && data && (
           <div style={{ animation: 'fadeIn 0.5s', display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
-            {/* KPI GRID */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
                 <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>DISTANCIA</div>
