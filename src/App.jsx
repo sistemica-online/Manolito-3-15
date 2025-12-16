@@ -2,10 +2,14 @@ import React, { useState } from 'react';
 import FitParser from 'fit-file-parser'; 
 import { saveAs } from 'file-saver';     
 import { 
-  UploadCloud, Activity, CheckCircle, AlertTriangle, Terminal, FileText
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area, Legend
+} from 'recharts';
+import { 
+  UploadCloud, Activity, CheckCircle, AlertTriangle, FileText, 
+  Heart, Zap, Footprints, ChevronDown
 } from 'lucide-react';
 
-// --- ESTILOS (Dark Mode) ---
+// --- ESTILOS "M55 DARK" ---
 const STYLES = {
   bg: '#0b0c15',
   card: '#151621',
@@ -16,49 +20,60 @@ const STYLES = {
   neonGreen: '#00ff9d',
   neonRed: '#ff0055',
   neonAmber: '#ffb700',
+  grid: '#334155'
 };
 
-// --- LOGICA M55 ---
-const calculateDecoupling = (records) => {
-  if (!records || records.length < 10) return 0;
+// --- LOGICA DE PROCESAMIENTO M55 ---
+const processFitData = (records) => {
+  if (!records || records.length === 0) return null;
 
-  const midPoint = Math.floor(records.length / 2);
-  const firstHalf = records.slice(0, midPoint);
-  const secondHalf = records.slice(midPoint);
-
-  const getAvg = (arr, field) => {
-    let sum = 0;
-    let count = 0;
-    arr.forEach(r => {
-      if (r[field]) {
-        sum += r[field];
-        count++;
-      }
-    });
-    return count > 0 ? sum / count : 0;
-  };
-
-  const avgSpeed1 = getAvg(firstHalf, 'speed');
-  const avgHR1 = getAvg(firstHalf, 'heart_rate');
-  const ef1 = avgHR1 > 0 ? avgSpeed1 / avgHR1 : 0;
-
-  const avgSpeed2 = getAvg(secondHalf, 'speed');
-  const avgHR2 = getAvg(secondHalf, 'heart_rate');
-  const ef2 = avgHR2 > 0 ? avgSpeed2 / avgHR2 : 0;
-
-  if (ef1 === 0) return 0;
+  // 1. Downsampling inteligente (para no bloquear el navegador con 5000 puntos)
+  // Tomamos 1 de cada X puntos para gráficas si es muy largo
+  const step = records.length > 2000 ? Math.floor(records.length / 1000) : 1;
   
-  // Decoupling positivo = Pérdida de eficiencia (malo)
-  // Decoupling negativo = Ganancia (raro, o bajada de ritmo)
-  return (((ef1 - ef2) / ef1) * 100).toFixed(2);
+  const chartData = [];
+  let totalHR = 0, countHR = 0;
+  
+  records.forEach((r, i) => {
+    // Acumular medias
+    if (r.heart_rate) { totalHR += r.heart_rate; countHR++; }
+
+    // Solo añadimos al gráfico según el step
+    if (i % step === 0) {
+      chartData.push({
+        dist: (r.distance / 1000).toFixed(2), // km
+        hr: r.heart_rate,
+        cadence: r.cadence,
+        gct: r.stance_time_balance, // GCT Left %
+        vertOsc: r.vertical_oscillation,
+        alt: r.altitude
+      });
+    }
+  });
+
+  // Cálculo del Desacople (Pa:HR) simplificado
+  // Comparamos eficiencia (pasos/latido o velocidad/latido) 1a mitad vs 2a mitad
+  const mid = Math.floor(records.length / 2);
+  const h1 = records.slice(0, mid).reduce((a,b) => a + (b.heart_rate||0), 0) / mid;
+  const h2 = records.slice(mid).reduce((a,b) => a + (b.heart_rate||0), 0) / (records.length - mid);
+  // Si el pulso sube más de un 5% en la segunda mitad asumiendo ritmo estable...
+  // (Nota: Esto es una aprox rápida para el dashboard inmediato)
+  const decoupling = h1 > 0 ? (((h2 - h1) / h1) * 100).toFixed(1) : 0;
+
+  return {
+    chartData,
+    avgHR: countHR ? Math.round(totalHR / countHR) : 0,
+    decoupling,
+    recordsCount: records.length,
+    totalDist: records[records.length-1]?.distance || 0
+  };
 };
 
 export default function App() {
   const [status, setStatus] = useState('IDLE'); 
-  const [metrics, setMetrics] = useState(null);
+  const [dashboardData, setDashboardData] = useState(null);
   const [csvContent, setCsvContent] = useState(null);
   const [fileName, setFileName] = useState("");
-  const [debugInfo, setDebugInfo] = useState("");
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
@@ -66,79 +81,36 @@ export default function App() {
 
     setFileName(file.name);
     setStatus('PARSING');
-    setMetrics(null);
-    setCsvContent(null);
+    setDashboardData(null);
 
     const reader = new FileReader();
     reader.onload = (e) => {
-      const content = e.target.result;
-      
-      // CONFIGURACIÓN CORREGIDA: Sin 'cascade' para lectura plana
       const fitParser = new FitParser({
-        force: true,
-        speedUnit: 'km/h',
+        force: true, 
+        speedUnit: 'km/h', 
         lengthUnit: 'km',
-        temperatureUnit: 'celsius',
-        elapsedRecordField: true,
-        // mode: 'cascade',  <-- ELIMINADO: Causa del error
+        elapsedRecordField: true
       });
 
-      fitParser.parse(content, (error, data) => {
+      fitParser.parse(e.target.result, (error, data) => {
         if (error) {
-          console.error("Error parser:", error);
+          console.error(error);
           setStatus('ERROR');
-          setDebugInfo("Error crítico leyendo el archivo binary FIT.");
           return;
         }
 
-        console.log("Datos crudos del FIT:", data); // Para depuración en consola F12
-
-        // Intentamos localizar los 'records' (telemetría segundo a segundo)
-        // A veces se llaman 'records', a veces 'record'
         const records = data.records || data.record || [];
-
-        if (records.length === 0) {
-          setStatus('ERROR');
-          setDebugInfo("El archivo se leyó, pero no contiene registros de actividad (array 'records' vacío). ¿Es un archivo de actividad válido?");
-          return;
-        }
-
-        // --- CÁLCULOS ---
-        const decoupling = calculateDecoupling(records);
-        const totalDist = records[records.length - 1]?.distance || 0;
         
-        // Media HR (filtrando ceros)
-        const validHRs = records.filter(r => r.heart_rate > 0);
-        const avgHR = validHRs.length > 0 
-          ? Math.round(validHRs.reduce((a, b) => a + b.heart_rate, 0) / validHRs.length) 
-          : 0;
+        // 1. Procesar datos para visualización
+        const processed = processFitData(records);
+        setDashboardData(processed);
 
-        setMetrics({
-          recordsCount: records.length,
-          distance: typeof totalDist === 'number' ? totalDist.toFixed(2) : "N/A",
-          avgHR: avgHR,
-          decoupling: decoupling
-        });
-
-        // --- GENERAR CSV ---
-        // Construimos el CSV línea a línea asegurando que haya datos
-        let csv = "Timestamp,Distance_km,Speed_kmh,HeartRate_bpm,Cadence_spm,Altitude_m,Power_w,GCT_Balance,Vert_Osc_mm\n";
-        
+        // 2. Generar CSV para la IA
+        let csv = "Timestamp,Distance_km,HeartRate_bpm,Cadence_spm,GCT_Balance_Left,Vert_Osc_mm\n";
         records.forEach(r => {
-           // Extracción segura de datos (si no existe, pon vacío)
-           const ts = r.timestamp ? new Date(r.timestamp).toISOString() : "";
-           const dist = r.distance || "";
-           const spd = r.speed || "";
-           const hr = r.heart_rate || "";
-           const cad = r.cadence || "";
-           const alt = r.altitude || "";
-           const pwr = r.power || "";
-           const gct = r.stance_time_balance || ""; // Garmin Balance
-           const osc = r.vertical_oscillation || "";
-
-           csv += `${ts},${dist},${spd},${hr},${cad},${alt},${pwr},${gct},${osc}\n`;
+           const t = r.timestamp ? new Date(r.timestamp).toISOString() : "";
+           csv += `${t},${r.distance},${r.heart_rate},${r.cadence},${r.stance_time_balance},${r.vertical_oscillation}\n`;
         });
-
         setCsvContent(csv);
         setStatus('SUCCESS');
       });
@@ -147,116 +119,196 @@ export default function App() {
   };
 
   const downloadCSV = () => {
-    if (!csvContent) return;
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
     saveAs(blob, `M55_RAW_${fileName}.csv`);
   };
 
+  // Tooltip personalizado para gráficas
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div style={{ backgroundColor: 'rgba(21, 22, 33, 0.95)', border: '1px solid #334155', padding: '10px', fontSize: '12px' }}>
+          <p style={{color: '#94a3b8'}}>Km {label}</p>
+          {payload.map((p, i) => (
+            <div key={i} style={{ color: p.color }}>
+              {p.name}: <b>{p.value}</b> {p.unit}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: STYLES.bg, color: STYLES.text, fontFamily: 'sans-serif', padding: '20px' }}>
+    <div style={{ minHeight: '100vh', backgroundColor: STYLES.bg, color: STYLES.text, fontFamily: 'sans-serif', paddingBottom: '40px' }}>
       
       {/* HEADER */}
-      <div style={{ maxWidth: '800px', margin: '0 auto', marginBottom: '40px', textAlign: 'center' }}>
-        <h1 style={{ fontSize: '32px', fontWeight: '900', fontStyle: 'italic', letterSpacing: '-1px' }}>
-          M55 <span style={{ color: STYLES.neonBlue }}>DECODER V2</span>
-        </h1>
-        <p style={{ color: STYLES.textDim, fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '2px' }}>
-          EXTRACCIÓN DE STREAMS DE GARMIN (.FIT)
-        </p>
-      </div>
-
-      {/* DROPZONE */}
-      <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-        <div style={{ 
-          border: `2px dashed ${status === 'SUCCESS' ? STYLES.neonGreen : (status === 'ERROR' ? STYLES.neonRed : STYLES.border)}`, 
-          borderRadius: '16px', 
-          backgroundColor: STYLES.card,
-          padding: '60px 20px',
-          textAlign: 'center',
-          position: 'relative',
-          transition: 'all 0.3s'
-        }}>
-          
-          <input 
-            type="file" 
-            accept=".fit" 
-            onChange={handleFileUpload}
-            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
-          />
-
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-            {status === 'IDLE' && <UploadCloud size={48} color={STYLES.neonBlue} />}
-            {status === 'PARSING' && <Activity size={48} color={STYLES.neonAmber} className="animate-pulse" />}
-            {status === 'SUCCESS' && <CheckCircle size={48} color={STYLES.neonGreen} />}
-            {status === 'ERROR' && <AlertTriangle size={48} color={STYLES.neonRed} />}
-
-            <div>
-              <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>
-                {status === 'IDLE' && "Arrastra tu archivo .FIT aquí"}
-                {status === 'PARSING' && "Analizando estructura FIT..."}
-                {status === 'SUCCESS' && "¡Lectura Completada!"}
-                {status === 'ERROR' && "Error de lectura"}
-              </h3>
-              <p style={{ fontSize: '12px', color: STYLES.textDim, marginTop: '8px' }}>
-                {status === 'ERROR' ? debugInfo : (fileName || "Soporta Garmin Nativo")}
-              </p>
-            </div>
+      <div style={{ borderBottom: `1px solid ${STYLES.border}`, padding: '20px', backgroundColor: 'rgba(11,12,21,0.9)', position: 'sticky', top: 0, zIndex: 50, backdropFilter: 'blur(5px)' }}>
+        <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h1 style={{ fontSize: '24px', fontWeight: '900', fontStyle: 'italic', margin: 0 }}>
+              M55 <span style={{ color: STYLES.neonBlue }}>TELEMETRY</span>
+            </h1>
+            <p style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold', letterSpacing: '1px' }}>
+              VISUALIZADOR FIT NATIVO
+            </p>
+          </div>
+          <div style={{ fontSize: '12px', color: STYLES.textDim }}>
+             {status === 'SUCCESS' ? '✅ ANÁLISIS COMPLETADO' : 'ESPERANDO ARCHIVO...'}
           </div>
         </div>
+      </div>
 
-        {/* RESULTADOS */}
-        {status === 'SUCCESS' && metrics && (
-          <div style={{ marginTop: '32px' }}>
+      <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '20px' }}>
+
+        {/* 1. DROPZONE (Siempre visible si no hay datos, o arriba pequeña si ya hay) */}
+        {status !== 'SUCCESS' && (
+          <div style={{ 
+            border: `2px dashed ${STYLES.border}`, borderRadius: '16px', backgroundColor: STYLES.card,
+            padding: '60px', textAlign: 'center', marginBottom: '40px', position: 'relative'
+          }}>
+            <input type="file" accept=".fit" onChange={handleFileUpload} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }} />
+            <UploadCloud size={48} color={STYLES.neonBlue} style={{ marginBottom: '16px' }} />
+            <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Arrastra tu archivo .FIT de Garmin</h3>
+            <p style={{ color: STYLES.textDim, fontSize: '12px', marginTop: '8px' }}>Procesamiento local seguro</p>
+          </div>
+        )}
+
+        {/* 2. DASHBOARD VISUAL (Solo si hay éxito) */}
+        {status === 'SUCCESS' && dashboardData && (
+          <div style={{ animation: 'fadeIn 0.5s' }}>
             
-            {/* KPI GRID */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '24px' }}>
-              
-              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '16px', borderRadius: '12px' }}>
-                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>REGISTROS</div>
-                <div style={{ fontSize: '20px', fontWeight: 'bold', fontFamily: 'monospace' }}>{metrics.recordsCount}</div>
-              </div>
-
-              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '16px', borderRadius: '12px' }}>
-                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>FC MEDIA</div>
-                <div style={{ fontSize: '20px', fontWeight: 'bold', fontFamily: 'monospace', color: STYLES.neonRed }}>{metrics.avgHR}</div>
-              </div>
-
-              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '16px', borderRadius: '12px' }}>
-                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>DESACOPLE</div>
-                <div style={{ fontSize: '20px', fontWeight: 'bold', fontFamily: 'monospace', color: metrics.decoupling > 5 ? STYLES.neonRed : STYLES.neonGreen }}>
-                  {metrics.decoupling}%
+            {/* KPI CARDS */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
+                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Activity size={12} /> DISTANCIA
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                  {(dashboardData.totalDist / 1000).toFixed(2)} <span style={{fontSize:'12px', color:STYLES.textDim}}>km</span>
                 </div>
               </div>
-            
+
+              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
+                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Heart size={12} color={STYLES.neonRed} /> FC MEDIA
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', fontFamily: 'monospace', color: STYLES.neonRed }}>
+                  {dashboardData.avgHR} <span style={{fontSize:'12px', color:STYLES.textDim}}>ppm</span>
+                </div>
+              </div>
+
+              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
+                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Zap size={12} color={STYLES.neonAmber} /> DRIFT / DESACOPLE
+                </div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', fontFamily: 'monospace', color: dashboardData.decoupling > 5 ? STYLES.neonRed : STYLES.neonGreen }}>
+                  {dashboardData.decoupling}%
+                </div>
+                <div style={{ fontSize: '10px', color: STYLES.textDim, marginTop: '4px' }}>
+                   {dashboardData.decoupling > 5 ? '⚠️ Pérdida de eficiencia' : '✅ Motor estable'}
+                </div>
+              </div>
             </div>
 
-            {/* BOTÓN CSV */}
-            <button 
-              onClick={downloadCSV}
-              style={{ 
-                width: '100%', 
-                backgroundColor: STYLES.neonBlue, 
-                color: '#000', 
-                fontWeight: 'bold', 
-                padding: '16px', 
-                borderRadius: '12px', 
-                border: 'none', 
-                cursor: 'pointer',
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center', 
-                gap: '8px'
-              }}
-            >
-              <FileText size={18} />
-              DESCARGAR CSV PROCESADO
-            </button>
-            <p style={{ textAlign: 'center', fontSize: '10px', color: STYLES.textDim, marginTop: '12px' }}>
-               Listo para subir a tu Analista IA (Contiene GCT y Streams)
-            </p>
+            {/* GRÁFICAS */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+
+              {/* GRÁFICA 1: FISIOLOGÍA (PULSO) */}
+              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Heart size={16} color={STYLES.neonRed} /> RESPUESTA CARDÍACA
+                </h3>
+                <div style={{ height: '250px', width: '100%' }}>
+                  <ResponsiveContainer>
+                    <AreaChart data={dashboardData.chartData}>
+                      <defs>
+                        <linearGradient id="colorHr" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={STYLES.neonRed} stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor={STYLES.neonRed} stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
+                      <XAxis dataKey="dist" stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
+                      <YAxis domain={['dataMin - 5', 'auto']} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Area type="monotone" dataKey="hr" stroke={STYLES.neonRed} fill="url(#colorHr)" strokeWidth={2} name="Pulso" unit="ppm" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* GRÁFICA 2: GCT BALANCE (SÓLEO) */}
+              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Footprints size={16} color={STYLES.neonGreen} /> SIMETRÍA (GCT BALANCE IZQ)
+                </h3>
+                <div style={{ height: '250px', width: '100%' }}>
+                  <ResponsiveContainer>
+                    <LineChart data={dashboardData.chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
+                      <XAxis dataKey="dist" stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
+                      {/* Eje Y centrado en 50% para ver la desviación */}
+                      <YAxis domain={[47, 53]} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
+                      <Tooltip content={<CustomTooltip />} />
+                      
+                      {/* ZONAS DE REFERENCIA */}
+                      <ReferenceLine y={50} stroke="#fff" strokeDasharray="3 3" opacity={0.5} label={{ value: 'Centro (50%)', position: 'right', fill: '#fff', fontSize: 10 }} />
+                      <ReferenceLine y={49} stroke={STYLES.neonRed} strokeDasharray="5 5" label={{ value: 'Alarma Sóleo (<49%)', position: 'right', fill: STYLES.neonRed, fontSize: 10 }} />
+                      
+                      <Line type="monotone" dataKey="gct" stroke={STYLES.neonGreen} strokeWidth={2} dot={false} name="GCT Izq" unit="%" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <p style={{ fontSize: '10px', color: STYLES.textDim, marginTop: '10px' }}>
+                  * Si la línea verde cruza la línea roja discontinua hacia abajo, hay fatiga estructural en el lado izquierdo.
+                </p>
+              </div>
+
+              {/* GRÁFICA 3: BIOMECÁNICA (CADENCIA) */}
+              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Activity size={16} color={STYLES.neonBlue} /> CADENCIA
+                </h3>
+                <div style={{ height: '150px', width: '100%' }}>
+                  <ResponsiveContainer>
+                    <LineChart data={dashboardData.chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
+                      <XAxis dataKey="dist" stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
+                      <YAxis domain={['auto', 'auto']} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Line type="monotone" dataKey="cadence" stroke={STYLES.neonBlue} strokeWidth={2} dot={false} name="Cadencia" unit="spm" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+            </div>
+
+            {/* 3. BOTÓN DE DESCARGA FINAL */}
+            <div style={{ marginTop: '40px', padding: '20px', backgroundColor: 'rgba(0, 242, 255, 0.05)', borderRadius: '12px', border: `1px solid ${STYLES.neonBlue}` }}>
+              <h4 style={{ fontSize: '14px', fontWeight: 'bold', color: STYLES.neonBlue, marginBottom: '10px' }}>
+                ¿TODO LISTO PARA EL ANÁLISIS IA?
+              </h4>
+              <p style={{ fontSize: '12px', color: STYLES.textDim, marginBottom: '16px' }}>
+                Descarga el archivo CSV enriquecido y pásaselo a tu Asistente para generar el JSON de diagnóstico.
+              </p>
+              <button 
+                onClick={downloadCSV}
+                style={{ 
+                  width: '100%', backgroundColor: STYLES.neonBlue, color: '#0b0c15', 
+                  fontWeight: '900', padding: '16px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                  display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px'
+                }}
+              >
+                <FileText size={18} /> DESCARGAR CSV ENRIQUECIDO
+              </button>
+            </div>
 
           </div>
         )}
+
       </div>
     </div>
   );
