@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 import FitParser from 'fit-file-parser'; 
 import { saveAs } from 'file-saver';     
 import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, ReferenceLine
 } from 'recharts';
 import { 
   UploadCloud, Activity, Heart, Zap, Footprints, FileText, 
-  ArrowRight, Mountain, Gauge, Ruler
+  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map
 } from 'lucide-react';
 
 // --- ESTILOS "M55 DARK" ---
@@ -16,20 +16,66 @@ const STYLES = {
   border: '#1e293b',
   text: '#e2e8f0',
   textDim: '#64748b',
-  neonBlue: '#00f2ff',   // Pace
-  neonGreen: '#00ff9d',  // GCT
-  neonRed: '#ff0055',    // HR
-  neonAmber: '#ffb700',  // Power
-  neonPurple: '#d946ef', // Vert Osc
-  neonOrange: '#f97316', // Stride
+  neonBlue: '#00f2ff',   
+  neonGreen: '#00ff9d',  
+  neonRed: '#ff0055',    
+  neonAmber: '#ffb700',  
+  neonPurple: '#d946ef', 
+  neonOrange: '#f97316', 
   grid: '#334155'
 };
 
-// --- LOGICA MATEMÁTICA AVANZADA ---
+// --- UTILIDADES GEOMÉTRICAS (GPX) ---
+const getDistanceFromLatLonInKm = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // Radio tierra km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+// --- PARSER DE GPX NATIVO ---
+const parseGpxString = (gpxStr) => {
+  const parser = new DOMParser();
+  const xmlDoc = parser.parseFromString(gpxStr, "text/xml");
+  const trkpts = xmlDoc.getElementsByTagName("trkpt");
+  
+  const elevationData = [];
+  let totalDist = 0;
+
+  for (let i = 0; i < trkpts.length; i++) {
+    const pt = trkpts[i];
+    const lat = parseFloat(pt.getAttribute("lat"));
+    const lon = parseFloat(pt.getAttribute("lon"));
+    const ele = parseFloat(pt.getElementsByTagName("ele")[0]?.textContent || 0);
+    
+    // Calcular distancia acumulada
+    if (i > 0) {
+      const prev = trkpts[i-1];
+      const prevLat = parseFloat(prev.getAttribute("lat"));
+      const prevLon = parseFloat(prev.getAttribute("lon"));
+      totalDist += getDistanceFromLatLonInKm(prevLat, prevLon, lat, lon);
+    }
+
+    // Downsampling visual (cada ~50m) para no saturar la gráfica
+    if (i % 5 === 0 || i === trkpts.length - 1) {
+        elevationData.push({
+            dist: parseFloat(totalDist.toFixed(3)),
+            alt: parseFloat(ele.toFixed(1))
+        });
+    }
+  }
+  return elevationData;
+};
+
+
+// --- LOGICA MATEMÁTICA AVANZADA FIT ---
 const calculateMetrics = (records) => {
   if (!records || records.length === 0) return null;
 
-  // 1. Filtrado y Limpieza
   const cleanRecords = records.filter(r => r.distance != null && !isNaN(r.distance));
   const step = cleanRecords.length > 2000 ? Math.floor(cleanRecords.length / 1000) : 1;
   
@@ -37,61 +83,45 @@ const calculateMetrics = (records) => {
   let totalHR = 0, countHR = 0;
   let maxDistVal = 0;
   
-  // Detectores de disponibilidad de datos
-  let hasAltitude = false;
   let hasPower = false;
   let hasVertOsc = false;
 
-  // Variables para suavizado de Ritmo (Media Móvil)
-  // Usamos una ventana de 5 puntos para que el ritmo no sea un diente de sierra loco
   const paceWindow = []; 
 
   for (let i = 0; i < cleanRecords.length; i++) {
     const r = cleanRecords[i];
-    
-    // Acumuladores KPI
     if (r.heart_rate) { totalHR += r.heart_rate; countHR++; }
-    if (r.altitude && r.altitude !== 0) hasAltitude = true;
     if (r.power && r.power !== 0) hasPower = true;
     if (r.vertical_oscillation && r.vertical_oscillation !== 0) hasVertOsc = true;
 
-    // Distancia Máxima
-    let dKm = r.distance; // fit-parser config gives km
+    let dKm = r.distance; 
     if (dKm > maxDistVal) maxDistVal = dKm;
 
-    // --- CÁLCULO DE RITMO (PACE) ---
-    // Si no tenemos speed directa, la calculamos por delta de distancia/tiempo
-    // Speed (m/s) = DeltaDist (km) * 1000 / DeltaTime (s)
+    // Calculo de Ritmo
     let speedMps = 0;
     if (i > 0) {
        const prev = cleanRecords[i-1];
-       const dDist = (r.distance - prev.distance) * 1000; // metros
-       const dTime = (new Date(r.timestamp) - new Date(prev.timestamp)) / 1000; // segundos
+       const dDist = (r.distance - prev.distance) * 1000; 
+       const dTime = (new Date(r.timestamp) - new Date(prev.timestamp)) / 1000; 
        if (dTime > 0) speedMps = dDist / dTime;
     } else {
-       speedMps = r.speed ? (r.speed * 1000 / 3600) : 0; // fallback si existe speed field
+       speedMps = r.speed ? (r.speed * 1000 / 3600) : 0; 
     }
 
-    // Suavizado de ritmo
     paceWindow.push(speedMps);
     if (paceWindow.length > 5) paceWindow.shift();
     const avgSpeedMps = paceWindow.reduce((a,b)=>a+b,0) / paceWindow.length;
 
-    // Convertir m/s a min/km
     let paceMinKm = 0;
-    if (avgSpeedMps > 0.5) { // Filtrar paradas
-       const minPerKm = 16.666666 / avgSpeedMps;
-       paceMinKm = minPerKm;
+    if (avgSpeedMps > 0.5) { 
+       paceMinKm = 16.666666 / avgSpeedMps;
     }
 
-    // --- CÁLCULO DE ZANCADA (STRIDE LENGTH) ---
-    // Stride (m) = Speed (m/min) / Cadence (spm)
     let strideLen = 0;
     if (r.cadence > 0 && avgSpeedMps > 0) {
       strideLen = (avgSpeedMps * 60) / r.cadence;
     }
 
-    // Guardar Punto para Gráfica (Solo cada X puntos para rendimiento)
     if (i % step === 0) {
       chartData.push({
         dist: parseFloat(dKm.toFixed(3)), 
@@ -99,21 +129,18 @@ const calculateMetrics = (records) => {
         cadence: r.cadence,
         gct: r.stance_time_balance, 
         vertOsc: r.vertical_oscillation,
-        alt: r.altitude,
         pwr: r.power,
-        pace: paceMinKm > 0 && paceMinKm < 20 ? parseFloat(paceMinKm.toFixed(2)) : null, // Filtro picos locos
+        pace: paceMinKm > 0 && paceMinKm < 20 ? parseFloat(paceMinKm.toFixed(2)) : null, 
         stride: strideLen > 0 && strideLen < 3 ? parseFloat(strideLen.toFixed(2)) : null
       });
     }
   }
 
-  // Generador de Ticks Eje X
   const xTicks = [];
   const limit = Math.ceil(maxDistVal);
   const tickStep = limit > 20 ? Math.ceil(limit / 20) : 1;
   for (let i = 0; i <= limit; i += tickStep) xTicks.push(i);
 
-  // Desacople
   const mid = Math.floor(cleanRecords.length / 2);
   const h1 = cleanRecords.slice(0, mid).reduce((a,b) => a + (b.heart_rate||0), 0) / mid;
   const h2 = cleanRecords.slice(mid).reduce((a,b) => a + (b.heart_rate||0), 0) / (cleanRecords.length - mid);
@@ -125,11 +152,11 @@ const calculateMetrics = (records) => {
     avgHR: countHR ? Math.round(totalHR / countHR) : 0,
     decoupling,
     totalDist: maxDistVal,
-    availability: { hasAltitude, hasPower, hasVertOsc }
+    availability: { hasPower, hasVertOsc }
   };
 };
 
-// Formateador de tiempo para tooltips (ej: 5.5 min/km -> 5:30)
+// Formateador de Ritmo
 const formatPace = (val) => {
   if (!val) return "--";
   const min = Math.floor(val);
@@ -140,6 +167,7 @@ const formatPace = (val) => {
 export default function App() {
   const [status, setStatus] = useState('IDLE'); 
   const [data, setData] = useState(null);
+  const [gpxData, setGpxData] = useState(null); // Estado para el GPX
   const [csvContent, setCsvContent] = useState(null);
   const [fileName, setFileName] = useState("");
 
@@ -150,6 +178,7 @@ export default function App() {
     setFileName(file.name);
     setStatus('PARSING');
     setData(null);
+    setGpxData(null);
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -164,17 +193,30 @@ export default function App() {
         const processed = calculateMetrics(records);
         setData(processed);
 
-        // CSV Full Export
-        let csv = "Timestamp,Dist_km,HR,Cadence,GCT_Left,VertOsc_mm,Power_W,Alt_m,Speed_mps\n";
+        // CSV Base
+        let csv = "Timestamp,Dist_km,HR,Cadence,GCT_Left,VertOsc_mm,Power_W,Speed_mps\n";
         records.forEach(r => {
            const t = r.timestamp ? new Date(r.timestamp).toISOString() : "";
-           csv += `${t},${r.distance},${r.heart_rate},${r.cadence},${r.stance_time_balance},${r.vertical_oscillation},${r.power},${r.altitude},${r.speed}\n`;
+           csv += `${t},${r.distance},${r.heart_rate},${r.cadence},${r.stance_time_balance},${r.vertical_oscillation},${r.power},${r.speed}\n`;
         });
         setCsvContent(csv);
         setStatus('SUCCESS');
       });
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  const handleGpxUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const text = e.target.result;
+        const elevationPoints = parseGpxString(text);
+        setGpxData(elevationPoints);
+    };
+    reader.readAsText(file);
   };
 
   const downloadCSV = () => {
@@ -200,8 +242,8 @@ export default function App() {
     return null;
   };
 
-  // Componente de Gráfica Reutilizable
-  const ChartSection = ({ title, icon: Icon, dataKey, color, unit, domain, type="line", yReversed=false }) => (
+  // Componente Gráfica
+  const ChartSection = ({ title, icon: Icon, dataset, dataKey, color, unit, domain, type="line", yReversed=false }) => (
     <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
       <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
         <Icon size={16} color={color} /> {title}
@@ -209,7 +251,7 @@ export default function App() {
       <div style={{ height: '200px', width: '100%' }}>
         <ResponsiveContainer>
           {type === 'area' ? (
-             <AreaChart data={data.chartData}>
+             <AreaChart data={dataset}>
                <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
                <XAxis dataKey="dist" type="number" domain={[0, 'dataMax']} ticks={data.xTicks} stroke={STYLES.textDim} fontSize={12} tickLine={false} axisLine={false} />
                <YAxis domain={domain || ['auto', 'auto']} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
@@ -217,15 +259,13 @@ export default function App() {
                <Area type="monotone" dataKey={dataKey} stroke={color} fill={color} fillOpacity={0.2} strokeWidth={2} name={title} unit={unit} />
              </AreaChart>
           ) : (
-             <LineChart data={data.chartData}>
+             <LineChart data={dataset}>
                <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
                <XAxis dataKey="dist" type="number" domain={[0, 'dataMax']} ticks={data.xTicks} stroke={STYLES.textDim} fontSize={12} tickLine={false} axisLine={false} />
                <YAxis domain={domain || ['auto', 'auto']} reversed={yReversed} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
                <Tooltip content={<CustomTooltip />} />
-               {/* Líneas de Referencia Especiales */}
                {dataKey === 'gct' && <ReferenceLine y={49} stroke={STYLES.neonRed} strokeDasharray="5 5" />}
                {dataKey === 'gct' && <ReferenceLine y={50} stroke="#fff" strokeDasharray="3 3" opacity={0.5} />}
-               
                <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2} dot={false} name={title} unit={unit} />
              </LineChart>
           )}
@@ -242,10 +282,10 @@ export default function App() {
         <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h1 style={{ fontSize: '24px', fontWeight: '900', fontStyle: 'italic', margin: 0 }}>
-              M55 <span style={{ color: STYLES.neonBlue }}>PRO ANALYZER</span>
+              M55 <span style={{ color: STYLES.neonBlue }}>FUSION DASHBOARD</span>
             </h1>
           </div>
-          <div style={{ fontSize: '12px', color: STYLES.textDim }}>{status === 'SUCCESS' ? '✅ FIT DECODED' : 'READY'}</div>
+          <div style={{ fontSize: '12px', color: STYLES.textDim }}>{status === 'SUCCESS' ? '✅ FIT LOADED' : 'READY'}</div>
         </div>
       </div>
 
@@ -256,7 +296,7 @@ export default function App() {
             <input type="file" accept=".fit" onChange={handleFileUpload} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }} />
             <UploadCloud size={48} color={STYLES.neonBlue} style={{ marginBottom: '16px' }} />
             <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Arrastra tu archivo .FIT</h3>
-            <p style={{ color: STYLES.textDim, fontSize: '12px', marginTop: '8px' }}>El sistema extraerá todas las gráficas disponibles</p>
+            <p style={{ color: STYLES.textDim, fontSize: '12px', marginTop: '8px' }}>Paso 1: Carga la telemetría base</p>
           </div>
         )}
 
@@ -279,39 +319,47 @@ export default function App() {
               </div>
             </div>
 
-            {/* GRÁFICAS DINÁMICAS */}
+            {/* ZONA DE CARGA GPX (Si no hay altitud) */}
+            {!gpxData && (
+                <div style={{ border: `1px dashed ${STYLES.border}`, borderRadius: '12px', padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', position: 'relative', cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.02)' }}>
+                    <input type="file" accept=".gpx" onChange={handleGpxUpload} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }} />
+                    <Map size={24} color={STYLES.textDim} />
+                    <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold' }}>¿Falta el Perfil? Añadir GPX</h4>
+                        <p style={{ margin: 0, fontSize: '10px', color: STYLES.textDim }}>Arrastra aquí tu archivo .gpx para superponer la altimetría</p>
+                    </div>
+                    <PlusCircle size={20} color={STYLES.neonBlue} />
+                </div>
+            )}
+
+            {/* GRÁFICAS */}
             
-            {/* 1. RITMO (PACE) - Siempre útil */}
-            <ChartSection title="Ritmo (min/km)" icon={Gauge} dataKey="pace" color={STYLES.neonBlue} unit="min/km" domain={[4, 10]} yReversed={true} />
+            {/* 1. PERFIL DE ELEVACIÓN (GPX o FIT) */}
+            {gpxData ? (
+                 <ChartSection title="Perfil de Elevación (Fuente: GPX)" icon={Mountain} dataset={gpxData} dataKey="alt" color={STYLES.text} unit="m" type="area" />
+            ) : (
+                 <div style={{ padding: '20px', border: `1px solid ${STYLES.border}`, borderRadius: '12px', textAlign: 'center', color: STYLES.textDim, fontSize: '12px' }}>
+                    Sin datos de altimetría. Carga un GPX para ver el perfil.
+                 </div>
+            )}
 
-            {/* 2. PULSO - Siempre útil */}
-            <ChartSection title="Frecuencia Cardíaca" icon={Heart} dataKey="hr" color={STYLES.neonRed} unit="ppm" domain={['dataMin - 5', 'auto']} type="area" />
+            {/* 2. RITMO */}
+            <ChartSection title="Ritmo (min/km)" icon={Gauge} dataset={data.chartData} dataKey="pace" color={STYLES.neonBlue} unit="min/km" domain={[4, 10]} yReversed={true} />
 
-            {/* 3. SIMETRÍA - Clave M55 */}
-            <ChartSection title="Simetría Sóleo (GCT Izq)" icon={Footprints} dataKey="gct" color={STYLES.neonGreen} unit="%" domain={[47, 53]} />
+            {/* 3. PULSO */}
+            <ChartSection title="Frecuencia Cardíaca" icon={Heart} dataset={data.chartData} dataKey="hr" color={STYLES.neonRed} unit="ppm" domain={['dataMin - 5', 'auto']} type="area" />
 
-            {/* 4. CADENCIA */}
-            <ChartSection title="Cadencia" icon={Activity} dataKey="cadence" color={STYLES.text} unit="spm" />
+            {/* 4. SIMETRÍA */}
+            <ChartSection title="Simetría Sóleo (GCT Izq)" icon={Footprints} dataset={data.chartData} dataKey="gct" color={STYLES.neonGreen} unit="%" domain={[47, 53]} />
 
-            {/* 5. OSCILACIÓN VERTICAL - Si existe */}
+            {/* 5. CADENCIA */}
+            <ChartSection title="Cadencia" icon={Activity} dataset={data.chartData} dataKey="cadence" color={STYLES.text} unit="spm" />
+
+            {/* OTROS (Si existen) */}
             {data.availability.hasVertOsc && (
-              <ChartSection title="Oscilación Vertical" icon={ArrowRight} dataKey="vertOsc" color={STYLES.neonPurple} unit="mm" />
+              <ChartSection title="Oscilación Vertical" icon={ArrowRight} dataset={data.chartData} dataKey="vertOsc" color={STYLES.neonPurple} unit="mm" />
             )}
 
-            {/* 6. ZANCADA - Calculada */}
-            <ChartSection title="Longitud de Zancada" icon={Ruler} dataKey="stride" color={STYLES.neonOrange} unit="m" domain={[0.5, 1.5]} />
-
-            {/* 7. ALTITUD - Si existe */}
-            {data.availability.hasAltitude && (
-              <ChartSection title="Perfil de Elevación" icon={Mountain} dataKey="alt" color={STYLES.textDim} unit="m" type="area" />
-            )}
-
-            {/* 8. POTENCIA - Si existe */}
-            {data.availability.hasPower && (
-              <ChartSection title="Potencia" icon={Zap} dataKey="pwr" color={STYLES.neonAmber} unit="w" />
-            )}
-
-            {/* BOTÓN DESCARGA */}
             <div style={{ marginTop: '20px', padding: '20px', backgroundColor: 'rgba(0, 242, 255, 0.05)', borderRadius: '12px', border: `1px solid ${STYLES.neonBlue}` }}>
               <button onClick={downloadCSV} style={{ width: '100%', backgroundColor: STYLES.neonBlue, color: '#0b0c15', fontWeight: '900', padding: '16px', borderRadius: '8px', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px' }}>
                 <FileText size={18} /> DESCARGAR CSV TOTAL
