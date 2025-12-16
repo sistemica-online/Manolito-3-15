@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import FitParser from 'fit-file-parser'; 
 import { saveAs } from 'file-saver';     
 import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area, Brush
 } from 'recharts';
 import { 
   UploadCloud, Activity, Heart, Zap, Footprints, FileText, 
-  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Timer, Maximize2, X, Smartphone, RotateCw
+  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Timer, Maximize2, X
 } from 'lucide-react';
 
 // --- ESTILOS "M55 DARK" ---
@@ -154,7 +154,7 @@ export default function App() {
   const [fileName, setFileName] = useState("");
   
   // --- ESTADO PARA LA PANTALLA COMPLETA ---
-  const [activeChart, setActiveChart] = useState(null); // Contiene la config de la gráfica a ampliar
+  const [activeChart, setActiveChart] = useState(null); 
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
@@ -228,11 +228,10 @@ export default function App() {
     return null;
   };
 
-  // --- MODAL DE PANTALLA COMPLETA ---
+  // --- MODAL DE PANTALLA COMPLETA CON ZOOM (BRUSH) ---
   const FullScreenModal = ({ chartConfig, data, xTicks, onClose }) => {
     const isMobile = window.innerWidth < 768;
     
-    // Estilos para forzar paisaje en móvil
     const mobileLandscapeStyle = isMobile ? {
         transform: 'rotate(90deg)',
         width: '100vh',
@@ -249,13 +248,12 @@ export default function App() {
     return (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: '#000', zIndex: 9999, display: 'flex', flexDirection: 'column' }}>
             
-            {/* Contenedor Giratorio en Móvil */}
             <div style={{ ...mobileLandscapeStyle, display: 'flex', flexDirection: 'column', padding: '20px', boxSizing: 'border-box', backgroundColor: '#000' }}>
                 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                     <h2 style={{ color: chartConfig.color, margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
                         <chartConfig.icon /> {chartConfig.title} 
-                        <span style={{fontSize: '12px', color: STYLES.textDim}}>(VISTA DETALLADA)</span>
+                        <span style={{fontSize: '12px', color: STYLES.textDim}}>(ZOOM ACTIVADO)</span>
                     </h2>
                     <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: '10px' }}>
                         <X size={32} />
@@ -271,6 +269,16 @@ export default function App() {
                             <YAxis domain={chartConfig.domain || ['auto', 'auto']} stroke={STYLES.textDim} fontSize={14} tickLine={false} axisLine={false} />
                             <Tooltip content={<CustomTooltip />} />
                             <Area type="monotone" dataKey={chartConfig.dataKey} stroke={chartConfig.color} fill={chartConfig.color} fillOpacity={0.2} strokeWidth={3} name={chartConfig.title} unit={chartConfig.unit} />
+                            
+                            {/* --- ZOOM CONTROL --- */}
+                            <Brush 
+                                dataKey="dist" 
+                                height={40} 
+                                stroke={chartConfig.color} 
+                                fill="#151621"
+                                tickFormatter={(val) => val.toFixed(1)}
+                            />
+
                         </AreaChart>
                     ) : (
                         <LineChart data={chartConfig.dataset || data}>
@@ -281,6 +289,16 @@ export default function App() {
                             {chartConfig.dataKey === 'gct' && <ReferenceLine y={49} stroke={STYLES.neonRed} strokeDasharray="5 5" />}
                             {chartConfig.dataKey === 'gct' && <ReferenceLine y={50} stroke="#fff" strokeDasharray="3 3" opacity={0.5} />}
                             <Line type="monotone" dataKey={chartConfig.dataKey} stroke={chartConfig.color} strokeWidth={3} dot={false} name={chartConfig.title} unit={chartConfig.unit} />
+                            
+                            {/* --- ZOOM CONTROL --- */}
+                            <Brush 
+                                dataKey="dist" 
+                                height={40} 
+                                stroke={chartConfig.color} 
+                                fill="#151621"
+                                tickFormatter={(val) => val.toFixed(1)}
+                            />
+
                         </LineChart>
                     )}
                     </ResponsiveContainer>
@@ -306,7 +324,7 @@ export default function App() {
       <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
         <props.icon size={16} color={props.color} /> {props.title}
       </h3>
-      <div style={{ height: '200px', width: '100%', pointerEvents: 'none' }}> {/* Desactivamos pointer events para que el click pase al padre */}
+      <div style={{ height: '200px', width: '100%', pointerEvents: 'none' }}> 
         <ResponsiveContainer>
           {props.type === 'area' ? (
              <AreaChart data={props.dataset || data.chartData}>
@@ -332,7 +350,6 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh', backgroundColor: STYLES.bg, color: STYLES.text, fontFamily: 'sans-serif', paddingBottom: '40px' }}>
       
-      {/* MODAL PANTALLA COMPLETA */}
       {activeChart && (
           <FullScreenModal 
             chartConfig={activeChart} 
@@ -367,7 +384,6 @@ export default function App() {
         {status === 'SUCCESS' && data && (
           <div style={{ animation: 'fadeIn 0.5s', display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
-            {/* KPI GRID */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
                 <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>DISTANCIA</div>
