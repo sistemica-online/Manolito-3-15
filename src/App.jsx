@@ -9,22 +9,25 @@ import {
   ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Timer, Maximize2, X, RotateCcw
 } from 'lucide-react';
 
-// --- ESTILOS "M55 DARK" ---
+// --- ESTILOS "POWER STATISTICS" (Clean & Minimal) ---
 const STYLES = {
-  bg: '#0b0c15',
-  card: '#151621',
-  border: '#1e293b',
-  text: '#e2e8f0',
-  textDim: '#64748b',
-  neonBlue: '#00f2ff',   
-  neonGreen: '#00ff9d',  
-  neonRed: '#ff0055',    
-  neonAmber: '#ffb700',  
-  neonPurple: '#d946ef', 
-  neonOrange: '#f97316', 
-  neonMagenta: '#ec4899',
-  neonCyan: '#22d3ee',
-  grid: '#334155'
+  bg: '#f8fafc',       // Gris muy claro
+  card: '#ffffff',     // Blanco puro
+  border: '#e2e8f0',   // Bordes sutiles
+  text: '#0f172a',     // Slate 900 (Casi negro)
+  textDim: '#64748b',  // Slate 500
+  
+  // Paleta de Datos Científica
+  c_blue: '#2563eb',   
+  c_red: '#dc2626',    
+  c_green: '#16a34a',  
+  c_amber: '#d97706',  
+  c_purple: '#7c3aed', 
+  c_grey: '#475569',   
+  c_cyan: '#0891b2',   
+  c_orange: '#ea580c', 
+  
+  grid: '#cbd5e1'      
 };
 
 // --- UTILIDADES GEOMÉTRICAS (GPX) ---
@@ -153,7 +156,6 @@ export default function App() {
   const [csvContent, setCsvContent] = useState(null);
   const [fileName, setFileName] = useState("");
   
-  // --- ESTADO PARA LA PANTALLA COMPLETA ---
   const [activeChart, setActiveChart] = useState(null); 
 
   const handleFileUpload = (event) => {
@@ -207,18 +209,18 @@ export default function App() {
 
   const downloadCSV = () => {
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
-    saveAs(blob, `M55_FULL_${fileName}.csv`);
+    saveAs(blob, `POWER_STATS_${fileName}.csv`);
   };
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
-        <div style={{ backgroundColor: 'rgba(21, 22, 33, 0.95)', border: '1px solid #334155', padding: '10px', fontSize: '12px', zIndex: 100 }}>
-          <p style={{color: '#94a3b8', borderBottom: '1px solid #334155', paddingBottom: '4px', marginBottom: '8px'}}>
-            Km {Number(label).toFixed(2)}
+        <div style={{ backgroundColor: 'white', border: '1px solid #ccc', padding: '10px', fontSize: '12px', zIndex: 100, boxShadow: '0 2px 5px rgba(0,0,0,0.1)' }}>
+          <p style={{color: '#333', borderBottom: '1px solid #eee', paddingBottom: '4px', marginBottom: '8px'}}>
+            Punto: <b>{Number(label).toFixed(3)} km</b>
           </p>
           {payload.map((p, i) => (
-            <div key={i} style={{ color: p.color, marginBottom: '2px' }}>
+            <div key={i} style={{ color: p.color, marginBottom: '2px', fontWeight: '500' }}>
               {p.name}: <b>{p.name === 'Ritmo' ? formatPace(p.value) : p.value}</b> {p.unit}
             </div>
           ))}
@@ -228,11 +230,8 @@ export default function App() {
     return null;
   };
 
-  // --- MODAL DE PANTALLA COMPLETA CON ZOOM REAL ---
   const FullScreenModal = ({ chartConfig, data, xTicks, onClose }) => {
     const isMobile = window.innerWidth < 768;
-    
-    // --- ESTADOS DE ZOOM ---
     const [left, setLeft] = useState('dataMin');
     const [right, setRight] = useState('dataMax');
     const [refAreaLeft, setRefAreaLeft] = useState('');
@@ -240,161 +239,66 @@ export default function App() {
 
     const zoom = () => {
         if (refAreaLeft === refAreaRight || refAreaRight === '') {
-            setRefAreaLeft('');
-            setRefAreaRight('');
-            return;
+            setRefAreaLeft(''); setRefAreaRight(''); return;
         }
-
-        let min = refAreaLeft;
-        let max = refAreaRight;
+        let min = refAreaLeft; let max = refAreaRight;
         if (min > max) [min, max] = [max, min];
-
-        setLeft(min);
-        setRight(max);
-        setRefAreaLeft('');
-        setRefAreaRight('');
+        setLeft(min); setRight(max);
+        setRefAreaLeft(''); setRefAreaRight('');
     };
 
-    const zoomOut = () => {
-        setLeft('dataMin');
-        setRight('dataMax');
-    };
+    const zoomOut = () => { setLeft('dataMin'); setRight('dataMax'); };
     
     const mobileLandscapeStyle = isMobile ? {
-        transform: 'rotate(90deg)',
-        width: '100vh',
-        height: '100vw',
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        translate: '-50% -50%',
-    } : {
-        width: '100%',
-        height: '100%'
-    };
+        transform: 'rotate(90deg)', width: '100vh', height: '100vw',
+        position: 'absolute', top: '50%', left: '50%', translate: '-50% -50%',
+    } : { width: '100%', height: '100%' };
 
     return (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: '#000', zIndex: 9999, display: 'flex', flexDirection: 'column' }}>
-            
-            <div style={{ ...mobileLandscapeStyle, display: 'flex', flexDirection: 'column', padding: '20px', boxSizing: 'border-box', backgroundColor: '#000' }}>
-                
-                {/* CABECERA DEL MODAL */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: '#f8fafc', zIndex: 9999, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ ...mobileLandscapeStyle, display: 'flex', flexDirection: 'column', padding: '20px', boxSizing: 'border-box', backgroundColor: '#f8fafc' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-                        <h2 style={{ color: chartConfig.color, margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <chartConfig.icon /> {chartConfig.title} 
+                        <h2 style={{ color: STYLES.text, margin: 0, display: 'flex', alignItems: 'center', gap: '10px', fontSize: '18px' }}>
+                            <chartConfig.icon size={20} color={chartConfig.color} /> {chartConfig.title} 
                         </h2>
-                        
-                        {/* BOTÓN DE RESET VISIBLE */}
                         {left !== 'dataMin' && (
-                             <button 
-                                onClick={zoomOut}
-                                style={{ 
-                                    backgroundColor: 'rgba(255, 255, 255, 0.1)', border: '1px solid white', color: 'white', 
-                                    padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold',
-                                    display: 'flex', alignItems: 'center', gap: '6px', animation: 'fadeIn 0.3s'
-                                }}
-                             >
-                                <RotateCcw size={14} /> RESET ZOOM
+                             <button onClick={zoomOut} style={{ backgroundColor: '#fff', border: `1px solid ${STYLES.border}`, color: STYLES.text, padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                                <RotateCcw size={14} /> RESET
                              </button>
                         )}
                     </div>
-
-                    <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: '10px' }}>
-                        <X size={32} />
+                    <button onClick={onClose} style={{ background: 'none', border: 'none', color: STYLES.textDim, cursor: 'pointer', padding: '5px' }}>
+                        <X size={28} />
                     </button>
                 </div>
                 
-                {/* INSTRUCCIONES CLARAS */}
-                <div style={{ textAlign: 'left', color: STYLES.textDim, fontSize: '12px', marginBottom: '8px', paddingLeft: '4px' }}>
-                    🖱️ Arrastra para ZOOM &nbsp;&nbsp; | &nbsp;&nbsp; ⚡ Doble Clic para RESET
+                <div style={{ textAlign: 'left', color: STYLES.textDim, fontSize: '12px', marginBottom: '8px' }}>
+                    Selecciona un área para hacer ZOOM | Doble clic para RESET
                 </div>
 
-                <div style={{ flex: 1, minHeight: 0, userSelect: 'none', cursor: 'crosshair' }}>
+                <div style={{ flex: 1, minHeight: 0, userSelect: 'none', cursor: 'crosshair', backgroundColor: '#fff', borderRadius: '8px', border: `1px solid ${STYLES.border}`, padding: '10px' }}>
                     <ResponsiveContainer width="100%" height="100%">
-                    {chartConfig.type === 'area' ? (
-                        <AreaChart 
-                            data={chartConfig.dataset || data}
-                            onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel)}
-                            onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel)}
-                            onMouseUp={zoom}
-                            onDoubleClick={zoomOut} // DOBLE CLIC PARA SALIR
-                        >
-                            <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
-                            
-                            <XAxis 
-                                dataKey="dist" 
-                                type="number" 
-                                allowDataOverflow 
-                                domain={[left, right]} 
-                                stroke={STYLES.textDim} 
-                                fontSize={14} 
-                                tickLine={false} 
-                                axisLine={false} 
-                            />
-                            
-                            <YAxis 
-                                allowDataOverflow
-                                domain={chartConfig.domain || ['auto', 'auto']} 
-                                stroke={STYLES.textDim} 
-                                fontSize={14} 
-                                tickLine={false} 
-                                axisLine={false} 
-                            />
-                            
-                            <Tooltip content={<CustomTooltip />} />
-                            
-                            <Area type="monotone" dataKey={chartConfig.dataKey} stroke={chartConfig.color} fill={chartConfig.color} fillOpacity={0.2} strokeWidth={3} name={chartConfig.title} unit={chartConfig.unit} animationDuration={300} />
-                            
-                            {refAreaLeft && refAreaRight ? (
-                                <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill={STYLES.text} fillOpacity={0.1} />
-                            ) : null}
-
-                        </AreaChart>
-                    ) : (
-                        <LineChart 
-                            data={chartConfig.dataset || data}
-                            onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel)}
-                            onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel)}
-                            onMouseUp={zoom}
-                            onDoubleClick={zoomOut} // DOBLE CLIC PARA SALIR
-                        >
-                            <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
-                            
-                            <XAxis 
-                                dataKey="dist" 
-                                type="number" 
-                                allowDataOverflow 
-                                domain={[left, right]} 
-                                stroke={STYLES.textDim} 
-                                fontSize={14} 
-                                tickLine={false} 
-                                axisLine={false} 
-                            />
-                            
-                            <YAxis 
-                                allowDataOverflow
-                                domain={chartConfig.domain || ['auto', 'auto']} 
-                                reversed={chartConfig.yReversed} 
-                                stroke={STYLES.textDim} 
-                                fontSize={14} 
-                                tickLine={false} 
-                                axisLine={false} 
-                            />
-                            
-                            <Tooltip content={<CustomTooltip />} />
-                            
-                            {chartConfig.dataKey === 'gct' && <ReferenceLine y={49} stroke={STYLES.neonRed} strokeDasharray="5 5" />}
-                            {chartConfig.dataKey === 'gct' && <ReferenceLine y={50} stroke="#fff" strokeDasharray="3 3" opacity={0.5} />}
-                            
-                            <Line type="monotone" dataKey={chartConfig.dataKey} stroke={chartConfig.color} strokeWidth={3} dot={false} name={chartConfig.title} unit={chartConfig.unit} animationDuration={300} />
-                            
-                            {refAreaLeft && refAreaRight ? (
-                                <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill={STYLES.text} fillOpacity={0.1} />
-                            ) : null}
-
-                        </LineChart>
-                    )}
+                    <LineChart 
+                        data={chartConfig.dataset || data}
+                        onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel)}
+                        onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel)}
+                        onMouseUp={zoom}
+                        onDoubleClick={zoomOut}
+                    >
+                        <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.5} />
+                        <XAxis dataKey="dist" type="number" allowDataOverflow domain={[left, right]} stroke={STYLES.textDim} fontSize={12} tickLine={false} axisLine={true} />
+                        <YAxis allowDataOverflow domain={chartConfig.domain || ['auto', 'auto']} reversed={chartConfig.yReversed} stroke={STYLES.textDim} fontSize={12} tickLine={false} axisLine={true} />
+                        <Tooltip content={<CustomTooltip />} />
+                        
+                        {chartConfig.dataKey === 'gct' && <ReferenceLine y={50} stroke="#94a3b8" strokeDasharray="3 3" />}
+                        
+                        <Line type="monotone" dataKey={chartConfig.dataKey} stroke={chartConfig.color} strokeWidth={1.5} dot={false} activeDot={{ r: 4 }} animationDuration={300} />
+                        
+                        {refAreaLeft && refAreaRight ? (
+                            <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill={STYLES.text} fillOpacity={0.05} />
+                        ) : null}
+                    </LineChart>
                     </ResponsiveContainer>
                 </div>
             </div>
@@ -406,34 +310,34 @@ export default function App() {
     <div 
         onClick={() => setActiveChart(props)}
         style={{ 
-            backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px', 
-            cursor: 'pointer', transition: 'transform 0.2s', position: 'relative' 
+            backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '24px', borderRadius: '8px', 
+            cursor: 'pointer', transition: 'all 0.2s', position: 'relative', boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
         }}
-        onMouseEnter={(e) => e.currentTarget.style.borderColor = props.color}
-        onMouseLeave={(e) => e.currentTarget.style.borderColor = STYLES.border}
+        onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)'; e.currentTarget.style.borderColor = '#cbd5e1'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)'; e.currentTarget.style.borderColor = STYLES.border; }}
     >
       <div style={{ position: 'absolute', top: '20px', right: '20px', color: STYLES.textDim }}>
-          <Maximize2 size={16} />
+          <Maximize2 size={18} />
       </div>
-      <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <props.icon size={16} color={props.color} /> {props.title}
+      <h3 style={{ fontSize: '14px', fontWeight: '700', color: STYLES.text, marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px', letterSpacing: '-0.02em' }}>
+        <props.icon size={18} color={props.color} /> {props.title.toUpperCase()}
       </h3>
-      <div style={{ height: '200px', width: '100%', pointerEvents: 'none' }}> 
+      <div style={{ height: '180px', width: '100%', pointerEvents: 'none' }}> 
         <ResponsiveContainer>
           {props.type === 'area' ? (
              <AreaChart data={props.dataset || data.chartData}>
-               <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
-               <XAxis dataKey="dist" type="number" domain={[0, 'dataMax']} ticks={data.xTicks} stroke={STYLES.textDim} fontSize={12} tickLine={false} axisLine={false} />
-               <YAxis domain={props.domain || ['auto', 'auto']} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
-               <Area type="monotone" dataKey={props.dataKey} stroke={props.color} fill={props.color} fillOpacity={0.2} strokeWidth={2} isAnimationActive={false} />
+               <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.5} vertical={false} />
+               <XAxis dataKey="dist" type="number" domain={[0, 'dataMax']} ticks={data.xTicks} stroke={STYLES.textDim} fontSize={11} tickLine={false} axisLine={false} />
+               <YAxis domain={props.domain || ['auto', 'auto']} stroke={STYLES.textDim} fontSize={11} tickLine={false} axisLine={false} />
+               <Area type="monotone" dataKey={props.dataKey} stroke={props.color} fill={props.color} fillOpacity={0.1} strokeWidth={1.5} isAnimationActive={false} />
              </AreaChart>
           ) : (
              <LineChart data={props.dataset || data.chartData}>
-               <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
-               <XAxis dataKey="dist" type="number" domain={[0, 'dataMax']} ticks={data.xTicks} stroke={STYLES.textDim} fontSize={12} tickLine={false} axisLine={false} />
-               <YAxis domain={props.domain || ['auto', 'auto']} reversed={props.yReversed} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
-               {props.dataKey === 'gct' && <ReferenceLine y={49} stroke={STYLES.neonRed} strokeDasharray="5 5" />}
-               <Line type="monotone" dataKey={props.dataKey} stroke={props.color} strokeWidth={2} dot={false} isAnimationActive={false} />
+               <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.5} vertical={false} />
+               <XAxis dataKey="dist" type="number" domain={[0, 'dataMax']} ticks={data.xTicks} stroke={STYLES.textDim} fontSize={11} tickLine={false} axisLine={false} />
+               <YAxis domain={props.domain || ['auto', 'auto']} reversed={props.yReversed} stroke={STYLES.textDim} fontSize={11} tickLine={false} axisLine={false} />
+               {props.dataKey === 'gct' && <ReferenceLine y={50} stroke="#cbd5e1" strokeDasharray="3 3" />}
+               <Line type="monotone" dataKey={props.dataKey} stroke={props.color} strokeWidth={1.5} dot={false} isAnimationActive={false} />
              </LineChart>
           )}
         </ResponsiveContainer>
@@ -442,7 +346,7 @@ export default function App() {
   );
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: STYLES.bg, color: STYLES.text, fontFamily: 'sans-serif', paddingBottom: '40px' }}>
+    <div style={{ minHeight: '100vh', backgroundColor: STYLES.bg, color: STYLES.text, fontFamily: 'sans-serif', paddingBottom: '60px' }}>
       
       {activeChart && (
           <FullScreenModal 
@@ -453,91 +357,102 @@ export default function App() {
           />
       )}
 
-      <div style={{ borderBottom: `1px solid ${STYLES.border}`, padding: '20px', backgroundColor: 'rgba(11,12,21,0.9)', position: 'sticky', top: 0, zIndex: 50, backdropFilter: 'blur(5px)' }}>
-        <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {/* HEADER POWER STATISTICS */}
+      <div style={{ borderBottom: `1px solid ${STYLES.border}`, padding: '24px', backgroundColor: STYLES.card, position: 'sticky', top: 0, zIndex: 50 }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <h1 style={{ fontSize: '24px', fontWeight: '900', fontStyle: 'italic', margin: 0 }}>
-              M55 <span style={{ color: STYLES.neonBlue }}>FUSION DASHBOARD</span>
+            <h1 style={{ fontSize: '20px', fontWeight: '800', letterSpacing: '-0.5px', margin: 0, color: STYLES.text }}>
+              POWER STATISTICS
             </h1>
+            <p style={{ fontSize: '11px', color: STYLES.textDim, fontWeight: '600', marginTop: '4px', letterSpacing: '0.5px' }}>
+              PROFESSIONAL RUNNING ANALYTICS
+            </p>
           </div>
-          <div style={{ fontSize: '12px', color: STYLES.textDim }}>{status === 'SUCCESS' ? '✅ FIT LOADED' : 'READY'}</div>
+          <div style={{ fontSize: '12px', fontWeight: '600', color: status === 'SUCCESS' ? STYLES.c_green : STYLES.textDim }}>
+             {status === 'SUCCESS' ? '● ONLINE' : '○ OFFLINE'}
+          </div>
         </div>
       </div>
 
-      <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '20px' }}>
+      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '30px 20px' }}>
 
         {status !== 'SUCCESS' && (
-          <div style={{ border: `2px dashed ${STYLES.border}`, borderRadius: '16px', backgroundColor: STYLES.card, padding: '60px', textAlign: 'center', marginBottom: '40px', position: 'relative' }}>
+          <div style={{ 
+            border: `1px dashed ${STYLES.border}`, borderRadius: '12px', backgroundColor: STYLES.card,
+            padding: '80px', textAlign: 'center', marginBottom: '40px', position: 'relative'
+          }}>
             <input type="file" accept=".fit" onChange={handleFileUpload} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }} />
-            <UploadCloud size={48} color={STYLES.neonBlue} style={{ marginBottom: '16px' }} />
-            <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Arrastra tu archivo .FIT</h3>
-            <p style={{ color: STYLES.textDim, fontSize: '12px', marginTop: '8px' }}>Paso 1: Carga la telemetría base</p>
+            <div style={{ backgroundColor: '#eff6ff', width: '64px', height: '64px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                <UploadCloud size={28} color={STYLES.c_blue} />
+            </div>
+            <h3 style={{ fontSize: '16px', fontWeight: '700', color: STYLES.text }}>Cargar archivo .FIT</h3>
+            <p style={{ color: STYLES.textDim, fontSize: '13px', marginTop: '8px' }}>Procesamiento local seguro</p>
           </div>
         )}
 
         {status === 'SUCCESS' && data && (
-          <div style={{ animation: 'fadeIn 0.5s', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div style={{ animation: 'fadeIn 0.5s', display: 'flex', flexDirection: 'column', gap: '32px' }}>
             
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
-                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>DISTANCIA</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', fontFamily: 'monospace' }}>{data.totalDist.toFixed(2)} km</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px' }}>
+              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '24px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+                <div style={{ fontSize: '11px', color: STYLES.textDim, fontWeight: '700', letterSpacing: '0.5px', marginBottom: '8px' }}>DISTANCIA TOTAL</div>
+                <div style={{ fontSize: '28px', fontWeight: '700', color: STYLES.text, letterSpacing: '-1px' }}>{data.totalDist.toFixed(2)} <span style={{fontSize:'14px', fontWeight:'500', color:STYLES.textDim}}>km</span></div>
               </div>
-              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
-                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>FC MEDIA</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', fontFamily: 'monospace', color: STYLES.neonRed }}>{data.avgHR} ppm</div>
+              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '24px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+                <div style={{ fontSize: '11px', color: STYLES.textDim, fontWeight: '700', letterSpacing: '0.5px', marginBottom: '8px' }}>FC MEDIA</div>
+                <div style={{ fontSize: '28px', fontWeight: '700', color: STYLES.c_red, letterSpacing: '-1px' }}>{data.avgHR} <span style={{fontSize:'14px', fontWeight:'500', color:STYLES.textDim}}>bpm</span></div>
               </div>
-              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
-                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>DESACOPLE</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', fontFamily: 'monospace', color: data.decoupling > 5 ? STYLES.neonRed : STYLES.neonGreen }}>{data.decoupling}%</div>
+              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '24px', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+                <div style={{ fontSize: '11px', color: STYLES.textDim, fontWeight: '700', letterSpacing: '0.5px', marginBottom: '8px' }}>DESACOPLE AERÓBICO</div>
+                <div style={{ fontSize: '28px', fontWeight: '700', color: data.decoupling > 5 ? STYLES.c_red : STYLES.c_green, letterSpacing: '-1px' }}>{data.decoupling}%</div>
               </div>
             </div>
 
             {!gpxData && !data.availability.hasAltitude && (
-                <div style={{ border: `1px dashed ${STYLES.border}`, borderRadius: '12px', padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', position: 'relative', cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.02)' }}>
+                <div style={{ border: `1px dashed ${STYLES.border}`, borderRadius: '8px', padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', position: 'relative', cursor: 'pointer', backgroundColor: '#fafafa' }}>
                     <input type="file" accept=".gpx" onChange={handleGpxUpload} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }} />
-                    <Map size={24} color={STYLES.textDim} />
-                    <div>
-                        <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold' }}>¿Falta el Perfil? Añadir GPX</h4>
-                        <p style={{ margin: 0, fontSize: '10px', color: STYLES.textDim }}>Arrastra aquí tu archivo .gpx para superponer la altimetría</p>
-                    </div>
-                    <PlusCircle size={20} color={STYLES.neonBlue} />
+                    <PlusCircle size={18} color={STYLES.textDim} />
+                    <span style={{ fontSize: '13px', color: STYLES.textDim, fontWeight: '500' }}>Cargar GPX para Altitud</span>
                 </div>
             )}
 
             {gpxData ? (
-                 <ChartSection title="Perfil de Elevación (Fuente: GPX)" icon={Mountain} dataset={gpxData} dataKey="alt" color={STYLES.text} unit="m" type="area" />
+                 <ChartSection title="Perfil de Elevación (GPX)" icon={Mountain} dataset={gpxData} dataKey="alt" color={STYLES.c_grey} unit="m" type="area" />
             ) : (data.availability.hasAltitude ? (
-                 <ChartSection title="Perfil de Elevación" icon={Mountain} dataset={data.chartData} dataKey="alt" color={STYLES.text} unit="m" type="area" />
+                 <ChartSection title="Perfil de Elevación" icon={Mountain} dataset={data.chartData} dataKey="alt" color={STYLES.c_grey} unit="m" type="area" />
             ) : null)}
 
-            <ChartSection title="Ritmo (min/km)" icon={Gauge} dataset={data.chartData} dataKey="pace" color={STYLES.neonBlue} unit="min/km" domain={[4, 10]} yReversed={true} />
-            <ChartSection title="Frecuencia Cardíaca" icon={Heart} dataset={data.chartData} dataKey="hr" color={STYLES.neonRed} unit="ppm" domain={['dataMin - 5', 'auto']} type="area" />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '24px' }}>
+                <ChartSection title="Ritmo" icon={Gauge} dataset={data.chartData} dataKey="pace" color={STYLES.c_blue} unit="min/km" domain={[4, 10]} yReversed={true} />
+                <ChartSection title="Frecuencia Cardíaca" icon={Heart} dataset={data.chartData} dataKey="hr" color={STYLES.c_red} unit="ppm" domain={['dataMin - 5', 'auto']} />
+            </div>
             
-            <ChartSection title="Simetría Sóleo (GCT Balance Izq)" icon={Footprints} dataset={data.chartData} dataKey="gct" color={STYLES.neonGreen} unit="%" domain={[47, 53]} />
-            
-            {data.availability.hasGCT_ms && (
-              <ChartSection title="Tiempo de Contacto Suelo (GCT)" icon={Timer} dataset={data.chartData} dataKey="gct_ms" color={STYLES.neonCyan} unit="ms" domain={['dataMin - 10', 'dataMax + 10']} />
-            )}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '24px' }}>
+                <ChartSection title="Simetría (GCT Balance Izq)" icon={Footprints} dataset={data.chartData} dataKey="gct" color={STYLES.c_green} unit="%" domain={[45, 55]} />
+                {data.availability.hasGCT_ms && (
+                  <ChartSection title="Tiempo Contacto (ms)" icon={Timer} dataset={data.chartData} dataKey="gct_ms" color={STYLES.c_cyan} unit="ms" domain={['dataMin - 10', 'dataMax + 10']} />
+                )}
+            </div>
 
-            <ChartSection title="Cadencia (SPM)" icon={Activity} dataset={data.chartData} dataKey="cadence" color={STYLES.text} unit="spm" domain={[140, 200]} />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '24px' }}>
+                <ChartSection title="Cadencia" icon={Activity} dataset={data.chartData} dataKey="cadence" color={STYLES.c_grey} unit="spm" domain={[140, 200]} />
+                <ChartSection title="Longitud de Zancada" icon={Ruler} dataset={data.chartData} dataKey="stride" color={STYLES.c_orange} unit="m" domain={[0.5, 1.5]} />
+            </div>
             
             {data.availability.hasVertOsc && (
-              <>
-                 <ChartSection title="Oscilación Vertical" icon={ArrowRight} dataset={data.chartData} dataKey="vertOsc" color={STYLES.neonPurple} unit="mm" />
-                 <ChartSection title="Ratio Vertical (%)" icon={Percent} dataset={data.chartData} dataKey="vRatio" color={STYLES.neonMagenta} unit="%" domain={[0, 15]} />
-              </>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '24px' }}>
+                 <ChartSection title="Oscilación Vertical" icon={ArrowRight} dataset={data.chartData} dataKey="vertOsc" color={STYLES.c_purple} unit="mm" />
+                 <ChartSection title="Ratio Vertical (%)" icon={Percent} dataset={data.chartData} dataKey="vRatio" color={STYLES.c_purple} unit="%" domain={[0, 15]} />
+              </div>
             )}
              
-            <ChartSection title="Longitud de Zancada" icon={Ruler} dataset={data.chartData} dataKey="stride" color={STYLES.neonOrange} unit="m" domain={[0.5, 1.5]} />
-
             {data.availability.hasPower && (
-              <ChartSection title="Potencia (Watts)" icon={Zap} dataset={data.chartData} dataKey="pwr" color={STYLES.neonAmber} unit="w" />
+              <ChartSection title="Potencia" icon={Zap} dataset={data.chartData} dataKey="pwr" color={STYLES.c_amber} unit="w" />
             )}
 
-            <div style={{ marginTop: '20px', padding: '20px', backgroundColor: 'rgba(0, 242, 255, 0.05)', borderRadius: '12px', border: `1px solid ${STYLES.neonBlue}` }}>
-              <button onClick={downloadCSV} style={{ width: '100%', backgroundColor: STYLES.neonBlue, color: '#0b0c15', fontWeight: '900', padding: '16px', borderRadius: '8px', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px' }}>
-                <FileText size={18} /> DESCARGAR CSV TOTAL
+            <div style={{ marginTop: '40px', textAlign: 'center' }}>
+              <button onClick={downloadCSV} style={{ backgroundColor: STYLES.text, color: 'white', fontWeight: '600', padding: '12px 24px', borderRadius: '6px', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                <FileText size={16} /> EXPORTAR CSV PROCESADO
               </button>
             </div>
 
