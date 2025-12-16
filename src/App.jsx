@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 import FitParser from 'fit-file-parser'; 
 import { saveAs } from 'file-saver';     
 import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area, Brush
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area, ReferenceArea
 } from 'recharts';
 import { 
   UploadCloud, Activity, Heart, Zap, Footprints, FileText, 
-  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Timer, Maximize2, X
+  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Timer, Maximize2, X, ZoomOut
 } from 'lucide-react';
 
 // --- ESTILOS "M55 DARK" ---
@@ -228,9 +228,38 @@ export default function App() {
     return null;
   };
 
-  // --- MODAL DE PANTALLA COMPLETA CON ZOOM (BRUSH) ---
+  // --- MODAL DE PANTALLA COMPLETA CON "TRUE ZOOM" ---
   const FullScreenModal = ({ chartConfig, data, xTicks, onClose }) => {
     const isMobile = window.innerWidth < 768;
+    
+    // --- ESTADOS DE ZOOM ---
+    const [left, setLeft] = useState('dataMin');
+    const [right, setRight] = useState('dataMax');
+    const [refAreaLeft, setRefAreaLeft] = useState('');
+    const [refAreaRight, setRefAreaRight] = useState('');
+
+    const zoom = () => {
+        if (refAreaLeft === refAreaRight || refAreaRight === '') {
+            setRefAreaLeft('');
+            setRefAreaRight('');
+            return;
+        }
+
+        // Ordenar coordenadas si se seleccionó al revés
+        let min = refAreaLeft;
+        let max = refAreaRight;
+        if (min > max) [min, max] = [max, min];
+
+        setLeft(min);
+        setRight(max);
+        setRefAreaLeft('');
+        setRefAreaRight('');
+    };
+
+    const zoomOut = () => {
+        setLeft('dataMin');
+        setRight('dataMax');
+    };
     
     const mobileLandscapeStyle = isMobile ? {
         transform: 'rotate(90deg)',
@@ -253,51 +282,112 @@ export default function App() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                     <h2 style={{ color: chartConfig.color, margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
                         <chartConfig.icon /> {chartConfig.title} 
-                        <span style={{fontSize: '12px', color: STYLES.textDim}}>(ZOOM ACTIVADO)</span>
+                        
+                        {left !== 'dataMin' && (
+                             <button 
+                                onClick={zoomOut}
+                                style={{ 
+                                    backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, color: STYLES.neonBlue, 
+                                    padding: '5px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px',
+                                    display: 'flex', alignItems: 'center', gap: '5px'
+                                }}
+                             >
+                                <ZoomOut size={14} /> ALEJAR ZOOM
+                             </button>
+                        )}
                     </h2>
+
                     <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: '10px' }}>
                         <X size={32} />
                     </button>
                 </div>
+                
+                <div style={{ textAlign: 'left', color: STYLES.textDim, fontSize: '12px', marginBottom: '8px' }}>
+                    {isMobile ? "Arrastra con el dedo sobre la gráfica para hacer ZOOM." : "Haz clic y arrastra para hacer ZOOM."}
+                </div>
 
-                <div style={{ flex: 1, minHeight: 0 }}>
+                <div style={{ flex: 1, minHeight: 0, userSelect: 'none' }}>
                     <ResponsiveContainer width="100%" height="100%">
                     {chartConfig.type === 'area' ? (
-                        <AreaChart data={chartConfig.dataset || data}>
+                        <AreaChart 
+                            data={chartConfig.dataset || data}
+                            onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel)}
+                            onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel)}
+                            onMouseUp={zoom}
+                        >
                             <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
-                            <XAxis dataKey="dist" type="number" domain={[0, 'dataMax']} ticks={xTicks} stroke={STYLES.textDim} fontSize={14} tickLine={false} axisLine={false} />
-                            <YAxis domain={chartConfig.domain || ['auto', 'auto']} stroke={STYLES.textDim} fontSize={14} tickLine={false} axisLine={false} />
-                            <Tooltip content={<CustomTooltip />} />
-                            <Area type="monotone" dataKey={chartConfig.dataKey} stroke={chartConfig.color} fill={chartConfig.color} fillOpacity={0.2} strokeWidth={3} name={chartConfig.title} unit={chartConfig.unit} />
                             
-                            {/* --- ZOOM CONTROL --- */}
-                            <Brush 
+                            <XAxis 
                                 dataKey="dist" 
-                                height={40} 
-                                stroke={chartConfig.color} 
-                                fill="#151621"
-                                tickFormatter={(val) => val.toFixed(1)}
+                                type="number" 
+                                allowDataOverflow 
+                                domain={[left, right]} 
+                                stroke={STYLES.textDim} 
+                                fontSize={14} 
+                                tickLine={false} 
+                                axisLine={false} 
                             />
+                            
+                            <YAxis 
+                                allowDataOverflow
+                                domain={chartConfig.domain || ['auto', 'auto']} 
+                                stroke={STYLES.textDim} 
+                                fontSize={14} 
+                                tickLine={false} 
+                                axisLine={false} 
+                            />
+                            
+                            <Tooltip content={<CustomTooltip />} />
+                            
+                            <Area type="monotone" dataKey={chartConfig.dataKey} stroke={chartConfig.color} fill={chartConfig.color} fillOpacity={0.2} strokeWidth={3} name={chartConfig.title} unit={chartConfig.unit} animationDuration={300} />
+                            
+                            {/* ZONA VISUAL DE SELECCIÓN */}
+                            {refAreaLeft && refAreaRight ? (
+                                <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill={STYLES.text} fillOpacity={0.1} />
+                            ) : null}
 
                         </AreaChart>
                     ) : (
-                        <LineChart data={chartConfig.dataset || data}>
+                        <LineChart 
+                            data={chartConfig.dataset || data}
+                            onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel)}
+                            onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel)}
+                            onMouseUp={zoom}
+                        >
                             <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
-                            <XAxis dataKey="dist" type="number" domain={[0, 'dataMax']} ticks={xTicks} stroke={STYLES.textDim} fontSize={14} tickLine={false} axisLine={false} />
-                            <YAxis domain={chartConfig.domain || ['auto', 'auto']} reversed={chartConfig.yReversed} stroke={STYLES.textDim} fontSize={14} tickLine={false} axisLine={false} />
+                            
+                            <XAxis 
+                                dataKey="dist" 
+                                type="number" 
+                                allowDataOverflow 
+                                domain={[left, right]} 
+                                stroke={STYLES.textDim} 
+                                fontSize={14} 
+                                tickLine={false} 
+                                axisLine={false} 
+                            />
+                            
+                            <YAxis 
+                                allowDataOverflow
+                                domain={chartConfig.domain || ['auto', 'auto']} 
+                                reversed={chartConfig.yReversed} 
+                                stroke={STYLES.textDim} 
+                                fontSize={14} 
+                                tickLine={false} 
+                                axisLine={false} 
+                            />
+                            
                             <Tooltip content={<CustomTooltip />} />
+                            
                             {chartConfig.dataKey === 'gct' && <ReferenceLine y={49} stroke={STYLES.neonRed} strokeDasharray="5 5" />}
                             {chartConfig.dataKey === 'gct' && <ReferenceLine y={50} stroke="#fff" strokeDasharray="3 3" opacity={0.5} />}
-                            <Line type="monotone" dataKey={chartConfig.dataKey} stroke={chartConfig.color} strokeWidth={3} dot={false} name={chartConfig.title} unit={chartConfig.unit} />
                             
-                            {/* --- ZOOM CONTROL --- */}
-                            <Brush 
-                                dataKey="dist" 
-                                height={40} 
-                                stroke={chartConfig.color} 
-                                fill="#151621"
-                                tickFormatter={(val) => val.toFixed(1)}
-                            />
+                            <Line type="monotone" dataKey={chartConfig.dataKey} stroke={chartConfig.color} strokeWidth={3} dot={false} name={chartConfig.title} unit={chartConfig.unit} animationDuration={300} />
+                            
+                            {/* ZONA VISUAL DE SELECCIÓN */}
+                            {refAreaLeft && refAreaRight ? (
+                                <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill={STYLES.text} fillOpacity={0.1} />
+                            ) : null}
 
                         </LineChart>
                     )}
@@ -384,6 +474,7 @@ export default function App() {
         {status === 'SUCCESS' && data && (
           <div style={{ animation: 'fadeIn 0.5s', display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
+            {/* KPI GRID */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
                 <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>DISTANCIA</div>
