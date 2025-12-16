@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { 
   UploadCloud, Activity, Heart, Zap, Footprints, FileText, 
-  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Search, Bug
+  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Microscope
 } from 'lucide-react';
 
 // --- ESTILOS "M55 DARK" ---
@@ -26,178 +26,10 @@ const STYLES = {
   grid: '#334155'
 };
 
-// --- UTILIDADES GEOMÉTRICAS (GPX) ---
-const getDistanceFromLatLonInKm = (lat1, lon1, lat2, lon2) => {
-  const R = 6371; 
-  const dLat = (lat2 - lat1) * (Math.PI / 180);
-  const dLon = (lon2 - lon1) * (Math.PI / 180);
-  const a = 
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-};
-
-const parseGpxString = (gpxStr) => {
-  const parser = new DOMParser();
-  const xmlDoc = parser.parseFromString(gpxStr, "text/xml");
-  const trkpts = xmlDoc.getElementsByTagName("trkpt");
-  
-  const elevationData = [];
-  let totalDist = 0;
-
-  for (let i = 0; i < trkpts.length; i++) {
-    const pt = trkpts[i];
-    const lat = parseFloat(pt.getAttribute("lat"));
-    const lon = parseFloat(pt.getAttribute("lon"));
-    const ele = parseFloat(pt.getElementsByTagName("ele")[0]?.textContent || 0);
-    
-    if (i > 0) {
-      const prev = trkpts[i-1];
-      const prevLat = parseFloat(prev.getAttribute("lat"));
-      const prevLon = parseFloat(prev.getAttribute("lon"));
-      totalDist += getDistanceFromLatLonInKm(prevLat, prevLon, lat, lon);
-    }
-
-    if (i % 5 === 0 || i === trkpts.length - 1) {
-        elevationData.push({
-            dist: parseFloat(totalDist.toFixed(3)),
-            alt: parseFloat(ele.toFixed(1))
-        });
-    }
-  }
-  return elevationData;
-};
-
-// --- LOGICA MATEMÁTICA AVANZADA FIT ---
-const calculateMetrics = (records) => {
-  if (!records || records.length === 0) return null;
-
-  const cleanRecords = records.filter(r => r.distance != null && !isNaN(r.distance));
-  const step = cleanRecords.length > 2000 ? Math.floor(cleanRecords.length / 1000) : 1;
-  
-  const chartData = [];
-  let totalHR = 0, countHR = 0;
-  let maxDistVal = 0;
-  
-  let hasPower = false;
-  let hasVertOsc = false;
-
-  const paceWindow = []; 
-
-  for (let i = 0; i < cleanRecords.length; i++) {
-    const r = cleanRecords[i];
-    if (r.heart_rate) { totalHR += r.heart_rate; countHR++; }
-    if (r.vertical_oscillation && r.vertical_oscillation !== 0) hasVertOsc = true;
-
-    // --- DETECTIVE DE POTENCIA ---
-    // Intentamos capturar cualquier cosa, pero aquí solo visualizamos si encontramos algo.
-    // La lógica real dependerá de lo que encontremos en el modo forense.
-    let pwrVal = r.power;
-    if ((pwrVal === undefined || pwrVal === null) && r.developerFields) {
-        for (const key in r.developerFields) {
-            const keyName = key.toLowerCase();
-            if (keyName.includes('power') || keyName.includes('watt')) {
-                pwrVal = r.developerFields[key];
-                break; 
-            }
-        }
-    }
-    if (pwrVal && pwrVal > 0) hasPower = true;
-
-    let dKm = r.distance; 
-    if (dKm > maxDistVal) maxDistVal = dKm;
-
-    // Calculo de Ritmo
-    let speedMps = 0;
-    if (i > 0) {
-       const prev = cleanRecords[i-1];
-       const dDist = (r.distance - prev.distance) * 1000; 
-       const dTime = (new Date(r.timestamp) - new Date(prev.timestamp)) / 1000; 
-       if (dTime > 0) speedMps = dDist / dTime;
-    } else {
-       speedMps = r.speed ? (r.speed * 1000 / 3600) : 0; 
-    }
-
-    paceWindow.push(speedMps);
-    if (paceWindow.length > 5) paceWindow.shift();
-    const avgSpeedMps = paceWindow.reduce((a,b)=>a+b,0) / paceWindow.length;
-
-    let paceMinKm = 0;
-    if (avgSpeedMps > 0.5) { 
-       paceMinKm = 16.666666 / avgSpeedMps;
-    }
-
-    // --- CORRECCIÓN CADENCIA ---
-    let realCadence = r.cadence;
-    if (realCadence > 0 && realCadence < 120) {
-        realCadence = realCadence * 2;
-    }
-
-    // Zancada (m)
-    let strideLen = 0;
-    if (realCadence > 0 && avgSpeedMps > 0) {
-      strideLen = (avgSpeedMps * 60) / realCadence;
-    }
-
-    // Ratio Vertical (%)
-    let vertRatio = null;
-    if (hasVertOsc && strideLen > 0 && r.vertical_oscillation > 0) {
-        vertRatio = (r.vertical_oscillation / (strideLen * 1000)) * 100;
-    }
-
-    if (i % step === 0) {
-      chartData.push({
-        dist: parseFloat(dKm.toFixed(3)), 
-        hr: r.heart_rate,
-        cadence: realCadence, 
-        gct: r.stance_time_balance, 
-        vertOsc: r.vertical_oscillation,
-        vRatio: vertRatio && vertRatio < 20 ? parseFloat(vertRatio.toFixed(2)) : null,
-        pwr: pwrVal, 
-        pace: paceMinKm > 0 && paceMinKm < 20 ? parseFloat(paceMinKm.toFixed(2)) : null, 
-        stride: strideLen > 0 && strideLen < 3 ? parseFloat(strideLen.toFixed(2)) : null
-      });
-    }
-  }
-
-  const xTicks = [];
-  const limit = Math.ceil(maxDistVal);
-  const tickStep = limit > 20 ? Math.ceil(limit / 20) : 1;
-  for (let i = 0; i <= limit; i += tickStep) xTicks.push(i);
-
-  const mid = Math.floor(cleanRecords.length / 2);
-  const h1 = cleanRecords.slice(0, mid).reduce((a,b) => a + (b.heart_rate||0), 0) / mid;
-  const h2 = cleanRecords.slice(mid).reduce((a,b) => a + (b.heart_rate||0), 0) / (cleanRecords.length - mid);
-  const decoupling = h1 > 0 ? (((h2 - h1) / h1) * 100).toFixed(1) : 0;
-
-  return {
-    chartData,
-    xTicks,
-    avgHR: countHR ? Math.round(totalHR / countHR) : 0,
-    decoupling,
-    totalDist: maxDistVal,
-    availability: { hasPower, hasVertOsc }
-  };
-};
-
-const formatPace = (val) => {
-  if (!val) return "--";
-  const min = Math.floor(val);
-  const sec = Math.round((val - min) * 60);
-  return `${min}:${sec.toString().padStart(2, '0')}`;
-};
-
 export default function App() {
   const [status, setStatus] = useState('IDLE'); 
-  const [data, setData] = useState(null);
-  const [gpxData, setGpxData] = useState(null); 
-  const [csvContent, setCsvContent] = useState(null);
+  const [debugData, setDebugData] = useState(null);
   const [fileName, setFileName] = useState("");
-  
-  // --- ESTADOS FORENSES ---
-  const [debugRawKeys, setDebugRawKeys] = useState([]); // Claves encontradas en devFields
-  const [debugSample, setDebugSample] = useState("");   // Muestra de un registro
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
@@ -205,9 +37,7 @@ export default function App() {
 
     setFileName(file.name);
     setStatus('PARSING');
-    setData(null);
-    setGpxData(null);
-    setDebugRawKeys([]);
+    setDebugData(null);
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -220,240 +50,81 @@ export default function App() {
 
         const records = resultData.records || resultData.record || [];
         
-        // --- FORENSE: Buscar qué demonios hay en developerFields ---
-        let foundKeys = new Set();
-        let sampleDevField = null;
+        // --- RAYOS X: BUSCAMOS UN REGISTRO "JUGOSO" ---
+        // Buscamos un registro que tenga datos (no el primero que a veces está vacío)
+        // Cogemos el registro número 100 o el del medio
+        const idx = Math.min(records.length - 1, 100);
+        const sample = records[idx];
 
-        // Miramos los primeros 100 registros para ver qué claves aparecen
-        for (let i = 0; i < Math.min(records.length, 100); i++) {
-            if (records[i].developerFields) {
-                Object.keys(records[i].developerFields).forEach(k => foundKeys.add(k));
-                if (!sampleDevField) sampleDevField = records[i].developerFields;
-            }
+        if (sample) {
+            // Preparamos el informe
+            const keys = Object.keys(sample);
+            const values = JSON.stringify(sample, null, 2);
+            setDebugData({ keys, values });
         }
-        setDebugRawKeys(Array.from(foundKeys));
-        if (sampleDevField) setDebugSample(JSON.stringify(sampleDevField));
-
-        const processed = calculateMetrics(records);
-        setData(processed);
-
-        // CSV
-        let csv = "Timestamp,Dist_km,HR,Cadence_SPM,GCT_Left,VertOsc_mm,VertRatio_Pct,Stride_m,Power_W,Speed_mps\n";
         
-        // Helper para CSV usando la lógica de "cualquier cosa que suene a power"
-        const getPwr = (r) => {
-             let p = r.power;
-             if (!p && r.running_power) p = r.running_power;
-             if (!p && r.developerFields) {
-                 for(let k in r.developerFields) {
-                     if(k.toLowerCase().includes('power') || k.toLowerCase().includes('watt')) return r.developerFields[k];
-                 }
-             }
-             return p;
-        };
-
-        records.forEach(r => {
-           let cad = r.cadence;
-           if (cad > 0 && cad < 120) cad = cad * 2;
-           let speedMps = r.speed ? (r.speed * 1000 / 3600) : 0;
-           let stride = (cad > 0 && speedMps > 0) ? (speedMps * 60 / cad) : 0;
-           let vRatio = (stride > 0 && r.vertical_oscillation > 0) ? (r.vertical_oscillation / (stride * 1000) * 100) : 0;
-           let finalPwr = getPwr(r);
-
-           const t = r.timestamp ? new Date(r.timestamp).toISOString() : "";
-           csv += `${t},${r.distance},${r.heart_rate},${cad},${r.stance_time_balance},${r.vertical_oscillation},${vRatio.toFixed(2)},${stride.toFixed(2)},${finalPwr || ''},${r.speed}\n`;
-        });
-        setCsvContent(csv);
         setStatus('SUCCESS');
       });
     };
     reader.readAsArrayBuffer(file);
   };
 
-  const handleGpxUpload = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const text = e.target.result;
-        const elevationPoints = parseGpxString(text);
-        setGpxData(elevationPoints);
-    };
-    reader.readAsText(file);
-  };
-
-  const downloadCSV = () => {
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
-    saveAs(blob, `M55_FULL_${fileName}.csv`);
-  };
-
-  const CustomTooltip = ({ active, payload, label }) => {
-    if (active && payload && payload.length) {
-      return (
-        <div style={{ backgroundColor: 'rgba(21, 22, 33, 0.95)', border: '1px solid #334155', padding: '10px', fontSize: '12px', zIndex: 100 }}>
-          <p style={{color: '#94a3b8', borderBottom: '1px solid #334155', paddingBottom: '4px', marginBottom: '8px'}}>
-            Km {Number(label).toFixed(2)}
-          </p>
-          {payload.map((p, i) => (
-            <div key={i} style={{ color: p.color, marginBottom: '2px' }}>
-              {p.name}: <b>{p.name === 'Ritmo' ? formatPace(p.value) : p.value}</b> {p.unit}
-            </div>
-          ))}
-        </div>
-      );
-    }
-    return null;
-  };
-
-  const ChartSection = ({ title, icon: Icon, dataset, dataKey, color, unit, domain, type="line", yReversed=false }) => (
-    <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
-      <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <Icon size={16} color={color} /> {title}
-      </h3>
-      <div style={{ height: '200px', width: '100%' }}>
-        <ResponsiveContainer>
-          {type === 'area' ? (
-             <AreaChart data={dataset}>
-               <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
-               <XAxis dataKey="dist" type="number" domain={[0, 'dataMax']} ticks={data.xTicks} stroke={STYLES.textDim} fontSize={12} tickLine={false} axisLine={false} />
-               <YAxis domain={domain || ['auto', 'auto']} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
-               <Tooltip content={<CustomTooltip />} />
-               <Area type="monotone" dataKey={dataKey} stroke={color} fill={color} fillOpacity={0.2} strokeWidth={2} name={title} unit={unit} />
-             </AreaChart>
-          ) : (
-             <LineChart data={dataset}>
-               <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
-               <XAxis dataKey="dist" type="number" domain={[0, 'dataMax']} ticks={data.xTicks} stroke={STYLES.textDim} fontSize={12} tickLine={false} axisLine={false} />
-               <YAxis domain={domain || ['auto', 'auto']} reversed={yReversed} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
-               <Tooltip content={<CustomTooltip />} />
-               {dataKey === 'gct' && <ReferenceLine y={49} stroke={STYLES.neonRed} strokeDasharray="5 5" />}
-               {dataKey === 'gct' && <ReferenceLine y={50} stroke="#fff" strokeDasharray="3 3" opacity={0.5} />}
-               <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2} dot={false} name={title} unit={unit} />
-             </LineChart>
-          )}
-        </ResponsiveContainer>
-      </div>
-    </div>
-  );
-
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: STYLES.bg, color: STYLES.text, fontFamily: 'sans-serif', paddingBottom: '40px' }}>
+    <div style={{ minHeight: '100vh', backgroundColor: STYLES.bg, color: STYLES.text, fontFamily: 'sans-serif', padding: '20px' }}>
       
-      <div style={{ borderBottom: `1px solid ${STYLES.border}`, padding: '20px', backgroundColor: 'rgba(11,12,21,0.9)', position: 'sticky', top: 0, zIndex: 50, backdropFilter: 'blur(5px)' }}>
-        <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: '900', fontStyle: 'italic', margin: 0 }}>
-              M55 <span style={{ color: STYLES.neonBlue }}>FUSION DASHBOARD</span>
-            </h1>
-          </div>
-          <div style={{ fontSize: '12px', color: STYLES.textDim }}>{status === 'SUCCESS' ? '✅ FIT LOADED' : 'READY'}</div>
-        </div>
+      {/* HEADER */}
+      <div style={{ maxWidth: '800px', margin: '0 auto', marginBottom: '40px', textAlign: 'center' }}>
+        <h1 style={{ fontSize: '32px', fontWeight: '900', fontStyle: 'italic', letterSpacing: '-1px' }}>
+          M55 <span style={{ color: STYLES.neonBlue }}>X-RAY</span>
+        </h1>
+        <p style={{ color: STYLES.textDim, fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '2px' }}>
+          DIAGNÓSTICO ESTRUCTURAL PROFUNDO
+        </p>
       </div>
 
-      <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '20px' }}>
+      <div style={{ maxWidth: '800px', margin: '0 auto' }}>
 
-        {status !== 'SUCCESS' && (
-          <div style={{ border: `2px dashed ${STYLES.border}`, borderRadius: '16px', backgroundColor: STYLES.card, padding: '60px', textAlign: 'center', marginBottom: '40px', position: 'relative' }}>
+        <div style={{ 
+            border: `2px dashed ${STYLES.border}`, borderRadius: '16px', backgroundColor: STYLES.card,
+            padding: '40px', textAlign: 'center', marginBottom: '40px', position: 'relative'
+          }}>
             <input type="file" accept=".fit" onChange={handleFileUpload} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }} />
             <UploadCloud size={48} color={STYLES.neonBlue} style={{ marginBottom: '16px' }} />
-            <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Arrastra tu archivo .FIT</h3>
-            <p style={{ color: STYLES.textDim, fontSize: '12px', marginTop: '8px' }}>Paso 1: Carga la telemetría base</p>
+            <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Sube el archivo "Misterioso"</h3>
+            <p style={{ color: STYLES.textDim, fontSize: '12px', marginTop: '8px' }}>Vamos a verle las tripas</p>
+        </div>
+
+        {/* INFORME DE RAYOS X */}
+        {status === 'SUCCESS' && debugData && (
+          <div style={{ animation: 'fadeIn 0.5s' }}>
+            
+            <div style={{ backgroundColor: '#0f172a', border: `1px solid ${STYLES.neonBlue}`, borderRadius: '12px', padding: '20px', fontFamily: 'monospace', fontSize: '12px', color: STYLES.neonBlue, overflowX: 'auto' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', borderBottom: `1px solid ${STYLES.border}`, paddingBottom: '10px' }}>
+                    <Microscope size={20} /> ESTRUCTURA INTERNA DEL REGISTRO #100
+                </div>
+
+                <div style={{ marginBottom: '20px' }}>
+                    <strong style={{ color: 'white' }}>CAMPOS DISPONIBLES (NOMBRES INTERNOS):</strong><br/>
+                    <div style={{ marginTop: '8px', color: '#94a3b8', wordBreak: 'break-all' }}>
+                        {debugData.keys.join(', ')}
+                    </div>
+                </div>
+
+                <div>
+                    <strong style={{ color: 'white' }}>VALORES DE EJEMPLO:</strong><br/>
+                    <pre style={{ marginTop: '8px', color: '#cbd5e1', backgroundColor: '#1e293b', padding: '15px', borderRadius: '8px' }}>
+                        {debugData.values}
+                    </pre>
+                </div>
+            </div>
+
+            <p style={{ textAlign: 'center', marginTop: '20px', color: STYLES.textDim }}>
+                Copia el contenido del recuadro azul y pégalo en el chat.
+            </p>
+
           </div>
         )}
 
-        {status === 'SUCCESS' && data && (
-          <div style={{ animation: 'fadeIn 0.5s', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-            
-            {/* ZONA DE INFORME FORENSE (SOLO SI SE DETECTAN CAMPOS EXTRAÑOS) */}
-            {debugRawKeys.length > 0 ? (
-                <div style={{ backgroundColor: '#2e2e10', border: '1px solid #ffff00', padding: '15px', borderRadius: '8px', color: '#ffff00', fontFamily: 'monospace', fontSize: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontWeight: 'bold' }}>
-                        <Bug size={16} /> INFORME FORENSE: CAMPOS OCULTOS ENCONTRADOS
-                    </div>
-                    <div style={{ marginBottom: '8px' }}>
-                        He encontrado estos campos en 'developerFields':<br/>
-                        <span style={{ color: 'white' }}>{debugRawKeys.join(', ')}</span>
-                    </div>
-                    <div>
-                        Muestra de datos (primer registro con datos):<br/>
-                        <span style={{ color: '#ccc' }}>{debugSample}</span>
-                    </div>
-                </div>
-            ) : (
-                <div style={{ textAlign: 'center', fontSize: '12px', color: STYLES.textDim }}>
-                   ℹ️ No se encontraron 'developerFields' (Campos Connect IQ). El archivo parece estándar.
-                </div>
-            )}
-
-
-            {/* KPI GRID */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
-                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>DISTANCIA</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', fontFamily: 'monospace' }}>{data.totalDist.toFixed(2)} km</div>
-              </div>
-              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
-                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>FC MEDIA</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', fontFamily: 'monospace', color: STYLES.neonRed }}>{data.avgHR} ppm</div>
-              </div>
-              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
-                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>DESACOPLE</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', fontFamily: 'monospace', color: data.decoupling > 5 ? STYLES.neonRed : STYLES.neonGreen }}>{data.decoupling}%</div>
-              </div>
-            </div>
-
-            {!gpxData && (
-                <div style={{ border: `1px dashed ${STYLES.border}`, borderRadius: '12px', padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', position: 'relative', cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.02)' }}>
-                    <input type="file" accept=".gpx" onChange={handleGpxUpload} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }} />
-                    <Map size={24} color={STYLES.textDim} />
-                    <div>
-                        <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold' }}>¿Falta el Perfil? Añadir GPX</h4>
-                        <p style={{ margin: 0, fontSize: '10px', color: STYLES.textDim }}>Arrastra aquí tu archivo .gpx para superponer la altimetría</p>
-                    </div>
-                    <PlusCircle size={20} color={STYLES.neonBlue} />
-                </div>
-            )}
-
-            {gpxData ? (
-                 <ChartSection title="Perfil de Elevación (Fuente: GPX)" icon={Mountain} dataset={gpxData} dataKey="alt" color={STYLES.text} unit="m" type="area" />
-            ) : (
-                 <div style={{ padding: '20px', border: `1px solid ${STYLES.border}`, borderRadius: '12px', textAlign: 'center', color: STYLES.textDim, fontSize: '12px' }}>
-                    Sin datos de altimetría. Carga un GPX para ver el perfil.
-                 </div>
-            )}
-
-            <ChartSection title="Ritmo (min/km)" icon={Gauge} dataset={data.chartData} dataKey="pace" color={STYLES.neonBlue} unit="min/km" domain={[4, 10]} yReversed={true} />
-            <ChartSection title="Frecuencia Cardíaca" icon={Heart} dataset={data.chartData} dataKey="hr" color={STYLES.neonRed} unit="ppm" domain={['dataMin - 5', 'auto']} type="area" />
-            <ChartSection title="Simetría Sóleo (GCT Izq)" icon={Footprints} dataset={data.chartData} dataKey="gct" color={STYLES.neonGreen} unit="%" domain={[47, 53]} />
-            <ChartSection title="Cadencia (SPM)" icon={Activity} dataset={data.chartData} dataKey="cadence" color={STYLES.text} unit="spm" domain={[140, 200]} />
-            
-            {data.availability.hasVertOsc && (
-              <>
-                 <ChartSection title="Oscilación Vertical" icon={ArrowRight} dataset={data.chartData} dataKey="vertOsc" color={STYLES.neonPurple} unit="mm" />
-                 <ChartSection title="Ratio Vertical (%)" icon={Percent} dataset={data.chartData} dataKey="vRatio" color={STYLES.neonMagenta} unit="%" domain={[0, 15]} />
-              </>
-            )}
-             
-            <ChartSection title="Longitud de Zancada" icon={Ruler} dataset={data.chartData} dataKey="stride" color={STYLES.neonOrange} unit="m" domain={[0.5, 1.5]} />
-
-            {/* GRÁFICA DE POTENCIA (INTENTO VISUALIZAR SI SE ACTIVÓ EL FLAG, O SI NO) */}
-            {data.availability.hasPower ? (
-              <ChartSection title="Potencia Detectada (Watts)" icon={Zap} dataset={data.chartData} dataKey="pwr" color={STYLES.neonAmber} unit="w" />
-            ) : (
-               <div style={{ padding: '20px', border: `1px solid ${STYLES.border}`, borderRadius: '12px', textAlign: 'center', color: STYLES.textDim, fontSize: '12px' }}>
-                 No se pudo visualizar la potencia. Revisa el Informe Forense arriba.
-               </div>
-            )}
-
-            <div style={{ marginTop: '20px', padding: '20px', backgroundColor: 'rgba(0, 242, 255, 0.05)', borderRadius: '12px', border: `1px solid ${STYLES.neonBlue}` }}>
-              <button onClick={downloadCSV} style={{ width: '100%', backgroundColor: STYLES.neonBlue, color: '#0b0c15', fontWeight: '900', padding: '16px', borderRadius: '8px', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px' }}>
-                <FileText size={18} /> DESCARGAR CSV TOTAL
-              </button>
-            </div>
-
-          </div>
-        )}
       </div>
     </div>
   );
