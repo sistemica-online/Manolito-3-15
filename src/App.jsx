@@ -1,12 +1,11 @@
-import React, { useState, useCallback } from 'react';
-import FitParser from 'fit-file-parser'; // El decodificador
-import { saveAs } from 'file-saver';     // El exportador
+import React, { useState } from 'react';
+import FitParser from 'fit-file-parser'; 
+import { saveAs } from 'file-saver';     
 import { 
-  UploadCloud, FileDown, Activity, Heart, Zap, 
-  AlertTriangle, CheckCircle, Terminal 
+  UploadCloud, Activity, CheckCircle, AlertTriangle, Terminal, FileText
 } from 'lucide-react';
 
-// --- ESTILOS M55 (Dark Mode Hardcoded) ---
+// --- ESTILOS (Dark Mode) ---
 const STYLES = {
   bg: '#0b0c15',
   card: '#151621',
@@ -19,22 +18,26 @@ const STYLES = {
   neonAmber: '#ffb700',
 };
 
-// --- UTILIDADES MATEMÁTICAS M55 ---
+// --- LOGICA M55 ---
 const calculateDecoupling = (records) => {
-  // Algoritmo: Dividimos la sesión en 2 mitades (excluyendo calentamiento/enfriamiento si quisiéramos)
-  // Aquí lo hacemos bruto: 1ª mitad vs 2ª mitad.
-  if (!records || records.length < 600) return null; // Mínimo 10 min
+  if (!records || records.length < 10) return 0;
 
   const midPoint = Math.floor(records.length / 2);
   const firstHalf = records.slice(0, midPoint);
   const secondHalf = records.slice(midPoint);
 
   const getAvg = (arr, field) => {
-    const sum = arr.reduce((acc, r) => acc + (r[field] || 0), 0);
-    return (sum / arr.length) || 1;
+    let sum = 0;
+    let count = 0;
+    arr.forEach(r => {
+      if (r[field]) {
+        sum += r[field];
+        count++;
+      }
+    });
+    return count > 0 ? sum / count : 0;
   };
 
-  // EF = Speed / HR
   const avgSpeed1 = getAvg(firstHalf, 'speed');
   const avgHR1 = getAvg(firstHalf, 'heart_rate');
   const ef1 = avgHR1 > 0 ? avgSpeed1 / avgHR1 : 0;
@@ -45,16 +48,17 @@ const calculateDecoupling = (records) => {
 
   if (ef1 === 0) return 0;
   
-  // Decoupling %: Cuánto cayó la eficiencia en la 2ª mitad
-  const decoupling = ((ef1 - ef2) / ef1) * 100;
-  return decoupling.toFixed(2);
+  // Decoupling positivo = Pérdida de eficiencia (malo)
+  // Decoupling negativo = Ganancia (raro, o bajada de ritmo)
+  return (((ef1 - ef2) / ef1) * 100).toFixed(2);
 };
 
 export default function App() {
-  const [status, setStatus] = useState('IDLE'); // IDLE, PARSING, SUCCESS, ERROR
+  const [status, setStatus] = useState('IDLE'); 
   const [metrics, setMetrics] = useState(null);
   const [csvContent, setCsvContent] = useState(null);
   const [fileName, setFileName] = useState("");
+  const [debugInfo, setDebugInfo] = useState("");
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
@@ -62,54 +66,77 @@ export default function App() {
 
     setFileName(file.name);
     setStatus('PARSING');
+    setMetrics(null);
+    setCsvContent(null);
 
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = e.target.result;
+      
+      // CONFIGURACIÓN CORREGIDA: Sin 'cascade' para lectura plana
       const fitParser = new FitParser({
         force: true,
         speedUnit: 'km/h',
         lengthUnit: 'km',
         temperatureUnit: 'celsius',
         elapsedRecordField: true,
-        mode: 'cascade',
+        // mode: 'cascade',  <-- ELIMINADO: Causa del error
       });
 
       fitParser.parse(content, (error, data) => {
         if (error) {
-          console.error(error);
+          console.error("Error parser:", error);
           setStatus('ERROR');
+          setDebugInfo("Error crítico leyendo el archivo binary FIT.");
           return;
         }
 
-        // --- 1. EXTRACCIÓN DE STREAMS (EL DESTRIPADO) ---
-        // Aquí sacamos solo lo que nos interesa del archivo FIT gigante
-        const records = data.records || [];
-        
-        // --- 2. CÁLCULOS EN VIVO (M55 LOGIC) ---
+        console.log("Datos crudos del FIT:", data); // Para depuración en consola F12
+
+        // Intentamos localizar los 'records' (telemetría segundo a segundo)
+        // A veces se llaman 'records', a veces 'record'
+        const records = data.records || data.record || [];
+
+        if (records.length === 0) {
+          setStatus('ERROR');
+          setDebugInfo("El archivo se leyó, pero no contiene registros de actividad (array 'records' vacío). ¿Es un archivo de actividad válido?");
+          return;
+        }
+
+        // --- CÁLCULOS ---
         const decoupling = calculateDecoupling(records);
-        const totalDistance = records[records.length - 1]?.distance || 0;
-        const avgHR = records.reduce((acc, r) => acc + (r.heart_rate || 0), 0) / records.length;
+        const totalDist = records[records.length - 1]?.distance || 0;
+        
+        // Media HR (filtrando ceros)
+        const validHRs = records.filter(r => r.heart_rate > 0);
+        const avgHR = validHRs.length > 0 
+          ? Math.round(validHRs.reduce((a, b) => a + b.heart_rate, 0) / validHRs.length) 
+          : 0;
 
         setMetrics({
           recordsCount: records.length,
-          distance: totalDistance.toFixed(2),
-          avgHR: Math.round(avgHR),
+          distance: typeof totalDist === 'number' ? totalDist.toFixed(2) : "N/A",
+          avgHR: avgHR,
           decoupling: decoupling
         });
 
-        // --- 3. GENERACIÓN DEL CSV PARA LA IA ---
-        // Preparamos las cabeceras que le gustan a ChatGPT/Claude
-        let csv = "Timestamp,Distance_km,Speed_kmh,HeartRate_bpm,Cadence_spm,Altitude_m,Power_w,GCT_Balance_Pct_Left,Vertical_Osc_mm\n";
+        // --- GENERAR CSV ---
+        // Construimos el CSV línea a línea asegurando que haya datos
+        let csv = "Timestamp,Distance_km,Speed_kmh,HeartRate_bpm,Cadence_spm,Altitude_m,Power_w,GCT_Balance,Vert_Osc_mm\n";
         
         records.forEach(r => {
-            // Normalización de GCT Balance (Garmin lo da a veces como 50.5 o como 128 bit mask)
-            // Nota: fit-file-parser a veces da 'stance_time_balance' ya procesado o crudo.
-            // Para este prototipo volcamos lo que haya para analizarlo.
-            const gct = r.stance_time_balance || ""; 
-            const pwr = r.power || "";
-            
-            csv += `${r.timestamp},${r.distance},${r.speed},${r.heart_rate},${r.cadence},${r.altitude},${pwr},${gct},${r.vertical_oscillation}\n`;
+           // Extracción segura de datos (si no existe, pon vacío)
+           const ts = r.timestamp ? new Date(r.timestamp).toISOString() : "";
+           const dist = r.distance || "";
+           const spd = r.speed || "";
+           const hr = r.heart_rate || "";
+           const cad = r.cadence || "";
+           const alt = r.altitude || "";
+           const pwr = r.power || "";
+           const gct = r.stance_time_balance || ""; // Garmin Balance
+           const osc = r.vertical_oscillation || "";
+
+           csv += `${ts},${dist},${spd},${hr},${cad},${alt},${pwr},${gct},${osc}\n`;
         });
 
         setCsvContent(csv);
@@ -131,23 +158,23 @@ export default function App() {
       {/* HEADER */}
       <div style={{ maxWidth: '800px', margin: '0 auto', marginBottom: '40px', textAlign: 'center' }}>
         <h1 style={{ fontSize: '32px', fontWeight: '900', fontStyle: 'italic', letterSpacing: '-1px' }}>
-          M55 <span style={{ color: STYLES.neonBlue }}>DECODER</span>
+          M55 <span style={{ color: STYLES.neonBlue }}>DECODER V2</span>
         </h1>
         <p style={{ color: STYLES.textDim, fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '2px' }}>
-          INGESTA DE TELEMETRÍA BRUTA (.FIT)
+          EXTRACCIÓN DE STREAMS DE GARMIN (.FIT)
         </p>
       </div>
 
-      {/* ZONA DE CARGA (DROPZONE SIMULADA) */}
+      {/* DROPZONE */}
       <div style={{ maxWidth: '600px', margin: '0 auto' }}>
         <div style={{ 
-          border: `2px dashed ${status === 'SUCCESS' ? STYLES.neonGreen : STYLES.border}`, 
+          border: `2px dashed ${status === 'SUCCESS' ? STYLES.neonGreen : (status === 'ERROR' ? STYLES.neonRed : STYLES.border)}`, 
           borderRadius: '16px', 
           backgroundColor: STYLES.card,
           padding: '60px 20px',
           textAlign: 'center',
-          transition: 'all 0.3s ease',
-          position: 'relative'
+          position: 'relative',
+          transition: 'all 0.3s'
         }}>
           
           <input 
@@ -166,40 +193,44 @@ export default function App() {
             <div>
               <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>
                 {status === 'IDLE' && "Arrastra tu archivo .FIT aquí"}
-                {status === 'PARSING' && "Destripando archivo..."}
-                {status === 'SUCCESS' && "¡Datos Extraídos con Éxito!"}
-                {status === 'ERROR' && "Error leyendo el archivo"}
+                {status === 'PARSING' && "Analizando estructura FIT..."}
+                {status === 'SUCCESS' && "¡Lectura Completada!"}
+                {status === 'ERROR' && "Error de lectura"}
               </h3>
               <p style={{ fontSize: '12px', color: STYLES.textDim, marginTop: '8px' }}>
-                {status === 'IDLE' ? "Soporta archivos nativos de Garmin/Coros/Suunto" : fileName}
+                {status === 'ERROR' ? debugInfo : (fileName || "Soporta Garmin Nativo")}
               </p>
             </div>
           </div>
         </div>
 
-        {/* PANEL DE RESULTADOS M55 */}
+        {/* RESULTADOS */}
         {status === 'SUCCESS' && metrics && (
-          <div style={{ marginTop: '32px', animation: 'fadeIn 0.5s' }}>
+          <div style={{ marginTop: '32px' }}>
             
-            {/* 1. MÉTRICAS INSTANTÁNEAS */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '24px' }}>
+            {/* KPI GRID */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '24px' }}>
+              
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '16px', borderRadius: '12px' }}>
-                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>PUNTOS DE DATO</div>
+                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>REGISTROS</div>
                 <div style={{ fontSize: '20px', fontWeight: 'bold', fontFamily: 'monospace' }}>{metrics.recordsCount}</div>
               </div>
+
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '16px', borderRadius: '12px' }}>
                 <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>FC MEDIA</div>
-                <div style={{ fontSize: '20px', fontWeight: 'bold', fontFamily: 'monospace', color: STYLES.neonRed }}>{metrics.avgHR} <span style={{fontSize:'10px'}}>ppm</span></div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', fontFamily: 'monospace', color: STYLES.neonRed }}>{metrics.avgHR}</div>
               </div>
+
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '16px', borderRadius: '12px' }}>
-                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>DESACOPLE (Pa:HR)</div>
+                <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>DESACOPLE</div>
                 <div style={{ fontSize: '20px', fontWeight: 'bold', fontFamily: 'monospace', color: metrics.decoupling > 5 ? STYLES.neonRed : STYLES.neonGreen }}>
                   {metrics.decoupling}%
                 </div>
               </div>
+            
             </div>
 
-            {/* 2. BOTÓN DE DESCARGA PARA IA */}
+            {/* BOTÓN CSV */}
             <button 
               onClick={downloadCSV}
               style={{ 
@@ -214,18 +245,14 @@ export default function App() {
                 display: 'flex', 
                 alignItems: 'center', 
                 justifyContent: 'center', 
-                gap: '8px',
-                fontSize: '14px',
-                textTransform: 'uppercase',
-                letterSpacing: '1px'
+                gap: '8px'
               }}
             >
-              <Terminal size={18} />
-              Descargar CSV para Analista IA
+              <FileText size={18} />
+              DESCARGAR CSV PROCESADO
             </button>
-            
-            <p style={{ textAlign: 'center', marginTop: '16px', fontSize: '10px', color: STYLES.textDim }}>
-              * Este archivo contiene la telemetría segundo a segundo. Súbelo a ChatGPT/Claude para obtener el JSON de análisis.
+            <p style={{ textAlign: 'center', fontSize: '10px', color: STYLES.textDim, marginTop: '12px' }}>
+               Listo para subir a tu Analista IA (Contiene GCT y Streams)
             </p>
 
           </div>
