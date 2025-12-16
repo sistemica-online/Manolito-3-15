@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import FitParser from 'fit-file-parser'; 
 import { saveAs } from 'file-saver';     
 import { 
@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { 
   UploadCloud, Activity, Heart, Zap, Footprints, FileText, 
-  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Timer
+  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Timer, Maximize2, X, Smartphone, RotateCw
 } from 'lucide-react';
 
 // --- ESTILOS "M55 DARK" ---
@@ -43,28 +43,21 @@ const parseGpxString = (gpxStr) => {
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(gpxStr, "text/xml");
   const trkpts = xmlDoc.getElementsByTagName("trkpt");
-  
   const elevationData = [];
   let totalDist = 0;
-
   for (let i = 0; i < trkpts.length; i++) {
     const pt = trkpts[i];
     const lat = parseFloat(pt.getAttribute("lat"));
     const lon = parseFloat(pt.getAttribute("lon"));
     const ele = parseFloat(pt.getElementsByTagName("ele")[0]?.textContent || 0);
-    
     if (i > 0) {
       const prev = trkpts[i-1];
       const prevLat = parseFloat(prev.getAttribute("lat"));
       const prevLon = parseFloat(prev.getAttribute("lon"));
       totalDist += getDistanceFromLatLonInKm(prevLat, prevLon, lat, lon);
     }
-
     if (i % 5 === 0 || i === trkpts.length - 1) {
-        elevationData.push({
-            dist: parseFloat(totalDist.toFixed(3)),
-            alt: parseFloat(ele.toFixed(1))
-        });
+        elevationData.push({ dist: parseFloat(totalDist.toFixed(3)), alt: parseFloat(ele.toFixed(1)) });
     }
   }
   return elevationData;
@@ -73,62 +66,37 @@ const parseGpxString = (gpxStr) => {
 // --- LOGICA MATEMÁTICA AVANZADA FIT ---
 const calculateMetrics = (records) => {
   if (!records || records.length === 0) return null;
-
   const cleanRecords = records.filter(r => r.distance != null && !isNaN(r.distance));
   const step = cleanRecords.length > 2000 ? Math.floor(cleanRecords.length / 1000) : 1;
-  
   const chartData = [];
-  let totalHR = 0, countHR = 0;
-  let maxDistVal = 0;
-  
-  // Detectores de disponibilidad
-  let hasPower = false;
-  let hasVertOsc = false;
-  let hasAltitude = false;
-  let hasGCT_ms = false;
+  let totalHR = 0, countHR = 0, maxDistVal = 0;
+  let hasPower = false, hasVertOsc = false, hasAltitude = false, hasGCT_ms = false;
 
   for (let i = 0; i < cleanRecords.length; i++) {
     const r = cleanRecords[i];
     if (r.heart_rate) { totalHR += r.heart_rate; countHR++; }
-    if (r.vertical_oscillation && r.vertical_oscillation !== 0) hasVertOsc = true;
+    if (r.vertical_oscillation) hasVertOsc = true;
     if (r.stance_time) hasGCT_ms = true;
 
-    // --- MAPPING DE DATOS ---
-    
-    // 1. Potencia (Tu archivo usa RP_Power)
     let pwrVal = r.RP_Power || r.power; 
     if (pwrVal && pwrVal > 0) hasPower = true;
 
-    // 2. Altitud (Tu archivo usa enhanced_altitude)
     let altVal = r.enhanced_altitude || r.altitude;
     if (altVal !== undefined) hasAltitude = true;
 
-    // 3. Velocidad (Tu archivo usa enhanced_speed en km/h)
     let speedVal = r.enhanced_speed || r.speed; 
-    let speedKmh = speedVal;
-    if (speedVal < 7) speedKmh = speedVal * 3.6; // fallback por si acaso viniera en m/s
+    let speedKmh = speedVal < 7 ? speedVal * 3.6 : speedVal;
 
-    // 4. Distancia
     let dKm = r.distance; 
     if (dKm > maxDistVal) maxDistVal = dKm;
 
-    // 5. Ritmo (Pace)
-    let paceMinKm = 0;
-    if (speedKmh > 1) paceMinKm = 60 / speedKmh;
-
-    // 6. Cadencia (Corrección x2 para convertir RPM a SPM si es necesario)
-    let realCadence = r.cadence;
-    if (realCadence > 0 && realCadence < 120) realCadence = realCadence * 2;
-
-    // 7. Zancada (NATIVA vs CALCULADA)
+    let paceMinKm = speedKmh > 1 ? 60 / speedKmh : 0;
+    let realCadence = (r.cadence > 0 && r.cadence < 120) ? r.cadence * 2 : r.cadence;
+    
     let strideLen = 0;
-    if (r.step_length && r.step_length > 0) {
-        strideLen = r.step_length / 1000; // mm -> m
-    } else if (realCadence > 0 && speedKmh > 0) {
-        strideLen = (speedKmh * 1000 / 60) / realCadence; 
-    }
+    if (r.step_length && r.step_length > 0) strideLen = r.step_length / 1000;
+    else if (realCadence > 0 && speedKmh > 0) strideLen = (speedKmh * 1000 / 60) / realCadence;
 
-    // 8. Ratio Vertical (NATIVO vs CALCULADO)
     let vertRatio = r.vertical_ratio;
     if (!vertRatio && hasVertOsc && strideLen > 0 && r.vertical_oscillation > 0) {
         vertRatio = (r.vertical_oscillation / (strideLen * 1000)) * 100;
@@ -184,6 +152,9 @@ export default function App() {
   const [gpxData, setGpxData] = useState(null); 
   const [csvContent, setCsvContent] = useState(null);
   const [fileName, setFileName] = useState("");
+  
+  // --- ESTADO PARA LA PANTALLA COMPLETA ---
+  const [activeChart, setActiveChart] = useState(null); // Contiene la config de la gráfica a ampliar
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
@@ -202,24 +173,18 @@ export default function App() {
 
       fitParser.parse(e.target.result, (error, resultData) => {
         if (error) { setStatus('ERROR'); return; }
-
         const records = resultData.records || resultData.record || [];
         const processed = calculateMetrics(records);
         setData(processed);
-
-        // CSV LIMPIO (Sin temperatura)
-        let csv = "Timestamp,Dist_km,HR,Cadence_SPM,GCT_Left_Pct,GCT_Time_ms,VertOsc_mm,VertRatio_Pct,Stride_m,Power_W,Alt_m,Speed_kmh\n";
         
+        let csv = "Timestamp,Dist_km,HR,Cadence_SPM,GCT_Left_Pct,GCT_Time_ms,VertOsc_mm,VertRatio_Pct,Stride_m,Power_W,Alt_m,Speed_kmh\n";
         records.forEach(r => {
-           let cad = r.cadence;
-           if (cad > 0 && cad < 120) cad = cad * 2;
-           
+           let cad = (r.cadence > 0 && r.cadence < 120) ? r.cadence * 2 : r.cadence;
            let pwr = r.RP_Power || r.power;
            let spd = r.enhanced_speed || r.speed;
            let alt = r.enhanced_altitude || r.altitude;
            let vr = r.vertical_ratio;
            let step = r.step_length ? r.step_length/1000 : 0;
-
            const t = r.timestamp ? new Date(r.timestamp).toISOString() : "";
            csv += `${t},${r.distance},${r.heart_rate},${cad},${r.stance_time_balance},${r.stance_time},${r.vertical_oscillation},${vr},${step},${pwr},${alt},${spd}\n`;
         });
@@ -233,12 +198,9 @@ export default function App() {
   const handleGpxUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (e) => {
-        const text = e.target.result;
-        const elevationPoints = parseGpxString(text);
-        setGpxData(elevationPoints);
+        setGpxData(parseGpxString(e.target.result));
     };
     reader.readAsText(file);
   };
@@ -266,30 +228,100 @@ export default function App() {
     return null;
   };
 
-  const ChartSection = ({ title, icon: Icon, dataset, dataKey, color, unit, domain, type="line", yReversed=false }) => (
-    <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
+  // --- MODAL DE PANTALLA COMPLETA ---
+  const FullScreenModal = ({ chartConfig, data, xTicks, onClose }) => {
+    const isMobile = window.innerWidth < 768;
+    
+    // Estilos para forzar paisaje en móvil
+    const mobileLandscapeStyle = isMobile ? {
+        transform: 'rotate(90deg)',
+        width: '100vh',
+        height: '100vw',
+        position: 'absolute',
+        top: '50%',
+        left: '50%',
+        translate: '-50% -50%',
+    } : {
+        width: '100%',
+        height: '100%'
+    };
+
+    return (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: '#000', zIndex: 9999, display: 'flex', flexDirection: 'column' }}>
+            
+            {/* Contenedor Giratorio en Móvil */}
+            <div style={{ ...mobileLandscapeStyle, display: 'flex', flexDirection: 'column', padding: '20px', boxSizing: 'border-box', backgroundColor: '#000' }}>
+                
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <h2 style={{ color: chartConfig.color, margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <chartConfig.icon /> {chartConfig.title} 
+                        <span style={{fontSize: '12px', color: STYLES.textDim}}>(VISTA DETALLADA)</span>
+                    </h2>
+                    <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: '10px' }}>
+                        <X size={32} />
+                    </button>
+                </div>
+
+                <div style={{ flex: 1, minHeight: 0 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                    {chartConfig.type === 'area' ? (
+                        <AreaChart data={chartConfig.dataset || data}>
+                            <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
+                            <XAxis dataKey="dist" type="number" domain={[0, 'dataMax']} ticks={xTicks} stroke={STYLES.textDim} fontSize={14} tickLine={false} axisLine={false} />
+                            <YAxis domain={chartConfig.domain || ['auto', 'auto']} stroke={STYLES.textDim} fontSize={14} tickLine={false} axisLine={false} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Area type="monotone" dataKey={chartConfig.dataKey} stroke={chartConfig.color} fill={chartConfig.color} fillOpacity={0.2} strokeWidth={3} name={chartConfig.title} unit={chartConfig.unit} />
+                        </AreaChart>
+                    ) : (
+                        <LineChart data={chartConfig.dataset || data}>
+                            <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
+                            <XAxis dataKey="dist" type="number" domain={[0, 'dataMax']} ticks={xTicks} stroke={STYLES.textDim} fontSize={14} tickLine={false} axisLine={false} />
+                            <YAxis domain={chartConfig.domain || ['auto', 'auto']} reversed={chartConfig.yReversed} stroke={STYLES.textDim} fontSize={14} tickLine={false} axisLine={false} />
+                            <Tooltip content={<CustomTooltip />} />
+                            {chartConfig.dataKey === 'gct' && <ReferenceLine y={49} stroke={STYLES.neonRed} strokeDasharray="5 5" />}
+                            {chartConfig.dataKey === 'gct' && <ReferenceLine y={50} stroke="#fff" strokeDasharray="3 3" opacity={0.5} />}
+                            <Line type="monotone" dataKey={chartConfig.dataKey} stroke={chartConfig.color} strokeWidth={3} dot={false} name={chartConfig.title} unit={chartConfig.unit} />
+                        </LineChart>
+                    )}
+                    </ResponsiveContainer>
+                </div>
+            </div>
+        </div>
+    );
+  };
+
+  const ChartSection = (props) => (
+    <div 
+        onClick={() => setActiveChart(props)}
+        style={{ 
+            backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px', 
+            cursor: 'pointer', transition: 'transform 0.2s', position: 'relative' 
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.borderColor = props.color}
+        onMouseLeave={(e) => e.currentTarget.style.borderColor = STYLES.border}
+    >
+      <div style={{ position: 'absolute', top: '20px', right: '20px', color: STYLES.textDim }}>
+          <Maximize2 size={16} />
+      </div>
       <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <Icon size={16} color={color} /> {title}
+        <props.icon size={16} color={props.color} /> {props.title}
       </h3>
-      <div style={{ height: '200px', width: '100%' }}>
+      <div style={{ height: '200px', width: '100%', pointerEvents: 'none' }}> {/* Desactivamos pointer events para que el click pase al padre */}
         <ResponsiveContainer>
-          {type === 'area' ? (
-             <AreaChart data={dataset}>
+          {props.type === 'area' ? (
+             <AreaChart data={props.dataset || data.chartData}>
                <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
                <XAxis dataKey="dist" type="number" domain={[0, 'dataMax']} ticks={data.xTicks} stroke={STYLES.textDim} fontSize={12} tickLine={false} axisLine={false} />
-               <YAxis domain={domain || ['auto', 'auto']} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
-               <Tooltip content={<CustomTooltip />} />
-               <Area type="monotone" dataKey={dataKey} stroke={color} fill={color} fillOpacity={0.2} strokeWidth={2} name={title} unit={unit} />
+               <YAxis domain={props.domain || ['auto', 'auto']} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
+               <Area type="monotone" dataKey={props.dataKey} stroke={props.color} fill={props.color} fillOpacity={0.2} strokeWidth={2} isAnimationActive={false} />
              </AreaChart>
           ) : (
-             <LineChart data={dataset}>
+             <LineChart data={props.dataset || data.chartData}>
                <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
                <XAxis dataKey="dist" type="number" domain={[0, 'dataMax']} ticks={data.xTicks} stroke={STYLES.textDim} fontSize={12} tickLine={false} axisLine={false} />
-               <YAxis domain={domain || ['auto', 'auto']} reversed={yReversed} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
-               <Tooltip content={<CustomTooltip />} />
-               {dataKey === 'gct' && <ReferenceLine y={49} stroke={STYLES.neonRed} strokeDasharray="5 5" />}
-               {dataKey === 'gct' && <ReferenceLine y={50} stroke="#fff" strokeDasharray="3 3" opacity={0.5} />}
-               <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2} dot={false} name={title} unit={unit} />
+               <YAxis domain={props.domain || ['auto', 'auto']} reversed={props.yReversed} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
+               {props.dataKey === 'gct' && <ReferenceLine y={49} stroke={STYLES.neonRed} strokeDasharray="5 5" />}
+               <Line type="monotone" dataKey={props.dataKey} stroke={props.color} strokeWidth={2} dot={false} isAnimationActive={false} />
              </LineChart>
           )}
         </ResponsiveContainer>
@@ -300,6 +332,16 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh', backgroundColor: STYLES.bg, color: STYLES.text, fontFamily: 'sans-serif', paddingBottom: '40px' }}>
       
+      {/* MODAL PANTALLA COMPLETA */}
+      {activeChart && (
+          <FullScreenModal 
+            chartConfig={activeChart} 
+            data={activeChart.dataset || data.chartData} 
+            xTicks={data.xTicks} 
+            onClose={() => setActiveChart(null)} 
+          />
+      )}
+
       <div style={{ borderBottom: `1px solid ${STYLES.border}`, padding: '20px', backgroundColor: 'rgba(11,12,21,0.9)', position: 'sticky', top: 0, zIndex: 50, backdropFilter: 'blur(5px)' }}>
         <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
