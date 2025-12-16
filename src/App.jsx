@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import FitParser from 'fit-file-parser'; 
 import { saveAs } from 'file-saver';     
 import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area, Legend
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area
 } from 'recharts';
 import { 
-  UploadCloud, Activity, Heart, Zap, Footprints, FileText, Split
+  UploadCloud, Activity, Heart, Zap, Footprints, FileText
 } from 'lucide-react';
 
 // --- ESTILOS "M55 DARK" ---
@@ -18,7 +18,7 @@ const STYLES = {
   neonBlue: '#00f2ff',
   neonGreen: '#00ff9d',
   neonRed: '#ff0055',
-  neonPink: '#d946ef',  // Color para pierna derecha
+  neonAmber: '#ffb700',
   grid: '#334155'
 };
 
@@ -26,6 +26,7 @@ const STYLES = {
 const processFitData = (records) => {
   if (!records || records.length === 0) return null;
 
+  // Downsampling para rendimiento visual (aprox 1000 puntos por gráfica)
   const step = records.length > 2000 ? Math.floor(records.length / 1000) : 1;
   
   const chartData = [];
@@ -35,22 +36,19 @@ const processFitData = (records) => {
     if (r.heart_rate) { totalHR += r.heart_rate; countHR++; }
 
     if (i % step === 0) {
-      // Cálculo de ambos lados
-      const gctL = r.stance_time_balance;
-      const gctR = gctL ? (100 - gctL) : null;
-
       chartData.push({
+        // CORRECCIÓN CLAVE: Distancia como número real para que el eje X sea continuo
         dist: parseFloat((r.distance / 1000).toFixed(3)), 
         hr: r.heart_rate,
         cadence: r.cadence,
-        gctLeft: gctL,
-        gctRight: gctR,
+        gct: r.stance_time_balance, // Solo Balance Izquierdo (lo que importa)
         vertOsc: r.vertical_oscillation,
         alt: r.altitude
       });
     }
   });
 
+  // Cálculo rápido de Desacople
   const mid = Math.floor(records.length / 2);
   const h1 = records.slice(0, mid).reduce((a,b) => a + (b.heart_rate||0), 0) / mid;
   const h2 = records.slice(mid).reduce((a,b) => a + (b.heart_rate||0), 0) / (records.length - mid);
@@ -116,6 +114,7 @@ export default function App() {
     saveAs(blob, `M55_RAW_${fileName}.csv`);
   };
 
+  // Tooltip Inteligente con Km exacto
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
@@ -125,7 +124,7 @@ export default function App() {
           </p>
           {payload.map((p, i) => (
             <div key={i} style={{ color: p.color, marginBottom: '2px' }}>
-              {p.name}: <b>{p.value ? Number(p.value).toFixed(2) : '--'}</b> {p.unit}
+              {p.name}: <b>{p.value}</b> {p.unit}
             </div>
           ))}
         </div>
@@ -156,6 +155,7 @@ export default function App() {
 
       <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '20px' }}>
 
+        {/* DROPZONE */}
         {status !== 'SUCCESS' && (
           <div style={{ 
             border: `2px dashed ${STYLES.border}`, borderRadius: '16px', backgroundColor: STYLES.card,
@@ -168,10 +168,11 @@ export default function App() {
           </div>
         )}
 
+        {/* DASHBOARD */}
         {status === 'SUCCESS' && dashboardData && (
           <div style={{ animation: 'fadeIn 0.5s' }}>
             
-            {/* KPI CARDS */}
+            {/* KPIs */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '32px' }}>
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
                 <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -199,77 +200,15 @@ export default function App() {
               </div>
             </div>
 
-            {/* GRÁFICAS */}
+            {/* GRÁFICAS LIMPIAS */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-
-              {/* GRÁFICA 2: DINÁMICA DE APOYO BILATERAL */}
-              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
-                <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Split size={16} color={STYLES.neonBlue} /> DINÁMICA DE APOYO (IZQ vs DER)
-                </h3>
-                <div style={{ height: '350px', width: '100%' }}>
-                  <ResponsiveContainer>
-                    <LineChart data={dashboardData.chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
-                      
-                      <XAxis 
-                        dataKey="dist" 
-                        type="number" 
-                        domain={['dataMin', 'dataMax']} 
-                        tickCount={10} 
-                        tickFormatter={(v) => v.toFixed(1)} 
-                        stroke={STYLES.textDim} 
-                        fontSize={10} 
-                        tickLine={false} 
-                        axisLine={false} 
-                      />
-
-                      {/* Escala centrada en 50 +/- 3 para ver detalle */}
-                      <YAxis domain={[47, 53]} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Legend verticalAlign="top" height={36}/>
-
-                      {/* LÍNEA DE REFERENCIA CENTRAL (50%) */}
-                      <ReferenceLine y={50} stroke="#fff" strokeDasharray="3 3" opacity={0.3} />
-                      
-                      {/* LÍNEA DE ALARMA IZQUIERDA (49%) */}
-                      <ReferenceLine y={49} stroke={STYLES.neonRed} strokeDasharray="5 5" label={{ value: 'Alarma Izq <49%', position: 'insideBottomRight', fill: STYLES.neonRed, fontSize: 10 }} />
-
-                      {/* PIERNA IZQUIERDA (CIAN) */}
-                      <Line 
-                        type="monotone" 
-                        dataKey="gctLeft" 
-                        stroke={STYLES.neonBlue} 
-                        strokeWidth={2} 
-                        dot={false} 
-                        name="Pierna Izq (L)" 
-                        unit="%" 
-                      />
-
-                      {/* PIERNA DERECHA (MAGENTA) */}
-                      <Line 
-                        type="monotone" 
-                        dataKey="gctRight" 
-                        stroke={STYLES.neonPink} 
-                        strokeWidth={2} 
-                        dot={false} 
-                        name="Pierna Der (R)" 
-                        unit="%" 
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-                <p style={{ fontSize: '10px', color: STYLES.textDim, marginTop: '10px', textAlign: 'center' }}>
-                  * El objetivo es que ambas líneas vayan pegadas a la línea central punteada. Si se abren ("efecto tijera"), hay compensación.
-                </p>
-              </div>
 
               {/* GRÁFICA 1: PULSO */}
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
                 <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Heart size={16} color={STYLES.neonRed} /> RESPUESTA CARDÍACA
                 </h3>
-                <div style={{ height: '200px', width: '100%' }}>
+                <div style={{ height: '250px', width: '100%' }}>
                   <ResponsiveContainer>
                     <AreaChart data={dashboardData.chartData}>
                       <defs>
@@ -280,6 +219,7 @@ export default function App() {
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
                       
+                      {/* EJE X NUMÉRICO INTELIGENTE */}
                       <XAxis 
                         dataKey="dist" 
                         type="number" 
@@ -300,8 +240,77 @@ export default function App() {
                 </div>
               </div>
 
+              {/* GRÁFICA 2: SÓLEO (VERSIÓN SIMPLE) */}
+              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Footprints size={16} color={STYLES.neonGreen} /> SIMETRÍA (GCT BALANCE IZQ)
+                </h3>
+                <div style={{ height: '250px', width: '100%' }}>
+                  <ResponsiveContainer>
+                    <LineChart data={dashboardData.chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
+                      
+                      <XAxis 
+                        dataKey="dist" 
+                        type="number" 
+                        domain={['dataMin', 'dataMax']} 
+                        tickCount={10} 
+                        tickFormatter={(v) => v.toFixed(1)} 
+                        stroke={STYLES.textDim} 
+                        fontSize={10} 
+                        tickLine={false} 
+                        axisLine={false} 
+                      />
+
+                      <YAxis domain={[47, 53]} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
+                      <Tooltip content={<CustomTooltip />} />
+                      
+                      {/* Zonas Críticas */}
+                      <ReferenceLine y={50} stroke="#fff" strokeDasharray="3 3" opacity={0.5} label={{ value: 'Centro (50%)', position: 'right', fill: '#fff', fontSize: 10 }} />
+                      <ReferenceLine y={49} stroke={STYLES.neonRed} strokeDasharray="5 5" label={{ value: 'Alarma Sóleo (<49%)', position: 'right', fill: STYLES.neonRed, fontSize: 10 }} />
+                      
+                      <Line type="monotone" dataKey="gct" stroke={STYLES.neonGreen} strokeWidth={2} dot={false} name="GCT Izq" unit="%" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <p style={{ fontSize: '10px', color: STYLES.textDim, marginTop: '10px' }}>
+                  * Si la línea verde cruza la línea roja discontinua hacia abajo, hay fatiga estructural en el lado izquierdo.
+                </p>
+              </div>
+
+              {/* GRÁFICA 3: CADENCIA */}
+              <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Activity size={16} color={STYLES.neonBlue} /> CADENCIA
+                </h3>
+                <div style={{ height: '150px', width: '100%' }}>
+                  <ResponsiveContainer>
+                    <LineChart data={dashboardData.chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={STYLES.grid} opacity={0.3} vertical={false} />
+                      
+                      <XAxis 
+                        dataKey="dist" 
+                        type="number" 
+                        domain={['dataMin', 'dataMax']} 
+                        tickCount={10} 
+                        tickFormatter={(v) => v.toFixed(1)} 
+                        stroke={STYLES.textDim} 
+                        fontSize={10} 
+                        tickLine={false} 
+                        axisLine={false} 
+                      />
+
+                      <YAxis domain={['auto', 'auto']} stroke={STYLES.textDim} fontSize={10} tickLine={false} axisLine={false} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Line type="monotone" dataKey="cadence" stroke={STYLES.neonBlue} strokeWidth={2} dot={false} name="Cadencia" unit="spm" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
             </div>
 
+            {/* BOTÓN DESCARGA */}
             <div style={{ marginTop: '40px', padding: '20px', backgroundColor: 'rgba(0, 242, 255, 0.05)', borderRadius: '12px', border: `1px solid ${STYLES.neonBlue}` }}>
               <button 
                 onClick={downloadCSV}
