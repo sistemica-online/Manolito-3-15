@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { 
   UploadCloud, Activity, Heart, Zap, Footprints, FileText, 
-  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent
+  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Search
 } from 'lucide-react';
 
 // --- ESTILOS "M55 DARK" ---
@@ -22,7 +22,7 @@ const STYLES = {
   neonAmber: '#ffb700',  
   neonPurple: '#d946ef', 
   neonOrange: '#f97316', 
-  neonMagenta: '#ec4899', // Nuevo color para Ratio Vertical
+  neonMagenta: '#ec4899',
   grid: '#334155'
 };
 
@@ -88,8 +88,30 @@ const calculateMetrics = (records) => {
   for (let i = 0; i < cleanRecords.length; i++) {
     const r = cleanRecords[i];
     if (r.heart_rate) { totalHR += r.heart_rate; countHR++; }
-    if (r.power && r.power !== 0) hasPower = true;
     if (r.vertical_oscillation && r.vertical_oscillation !== 0) hasVertOsc = true;
+
+    // --- DETECTIVE DE POTENCIA (NUEVO) ---
+    let pwrVal = r.power;
+    
+    // 1. Si no está en 'power', buscamos en alias comunes
+    if (pwrVal === undefined || pwrVal === null) {
+        if (r.running_power) pwrVal = r.running_power;
+    }
+    
+    // 2. Si sigue vacío, buscamos en los campos de desarrollador (Connect IQ)
+    if ((pwrVal === undefined || pwrVal === null) && r.developerFields) {
+        // Buscamos cualquier clave que contenga 'power' o 'watt'
+        for (const key in r.developerFields) {
+            const keyName = key.toLowerCase();
+            if (keyName.includes('power') || keyName.includes('watt')) {
+                pwrVal = r.developerFields[key];
+                break; // Encontrado!
+            }
+        }
+    }
+
+    // Flag de disponibilidad
+    if (pwrVal && pwrVal > 0) hasPower = true;
 
     let dKm = r.distance; 
     if (dKm > maxDistVal) maxDistVal = dKm;
@@ -126,8 +148,7 @@ const calculateMetrics = (records) => {
       strideLen = (avgSpeedMps * 60) / realCadence;
     }
 
-    // --- NUEVO: RATIO VERTICAL (%) ---
-    // (Oscilación mm / (Zancada m * 1000)) * 100
+    // Ratio Vertical (%)
     let vertRatio = null;
     if (hasVertOsc && strideLen > 0 && r.vertical_oscillation > 0) {
         vertRatio = (r.vertical_oscillation / (strideLen * 1000)) * 100;
@@ -140,8 +161,8 @@ const calculateMetrics = (records) => {
         cadence: realCadence, 
         gct: r.stance_time_balance, 
         vertOsc: r.vertical_oscillation,
-        vRatio: vertRatio && vertRatio < 20 ? parseFloat(vertRatio.toFixed(2)) : null, // Filtro de seguridad
-        pwr: r.power,
+        vRatio: vertRatio && vertRatio < 20 ? parseFloat(vertRatio.toFixed(2)) : null,
+        pwr: pwrVal, // Usamos el valor detectado
         pace: paceMinKm > 0 && paceMinKm < 20 ? parseFloat(paceMinKm.toFixed(2)) : null, 
         stride: strideLen > 0 && strideLen < 3 ? parseFloat(strideLen.toFixed(2)) : null
       });
@@ -181,6 +202,7 @@ export default function App() {
   const [gpxData, setGpxData] = useState(null); 
   const [csvContent, setCsvContent] = useState(null);
   const [fileName, setFileName] = useState("");
+  const [debugMsg, setDebugMsg] = useState(""); // Para ver si detectamos power
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
@@ -190,6 +212,7 @@ export default function App() {
     setStatus('PARSING');
     setData(null);
     setGpxData(null);
+    setDebugMsg("");
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -203,19 +226,38 @@ export default function App() {
         const records = resultData.records || resultData.record || [];
         const processed = calculateMetrics(records);
         setData(processed);
+        
+        if (processed.availability.hasPower) {
+            setDebugMsg("⚡ Potencia detectada y activada.");
+        } else {
+            setDebugMsg("⚠️ No se encontró canal de Potencia (Ni nativo ni Connect IQ).");
+        }
 
-        // CSV Base Enriquecido
+        // CSV Enriquecido con Potencia Detectada
         let csv = "Timestamp,Dist_km,HR,Cadence_SPM,GCT_Left,VertOsc_mm,VertRatio_Pct,Stride_m,Power_W,Speed_mps\n";
+        
+        // Helper para extraer potencia en el CSV igual que en la gráfica
+        const getPwr = (r) => {
+             let p = r.power;
+             if (!p && r.running_power) p = r.running_power;
+             if (!p && r.developerFields) {
+                 for(let k in r.developerFields) {
+                     if(k.toLowerCase().includes('power') || k.toLowerCase().includes('watt')) return r.developerFields[k];
+                 }
+             }
+             return p;
+        };
+
         records.forEach(r => {
-           // Recalculamos al vuelo para el CSV
            let cad = r.cadence;
            if (cad > 0 && cad < 120) cad = cad * 2;
            let speedMps = r.speed ? (r.speed * 1000 / 3600) : 0;
            let stride = (cad > 0 && speedMps > 0) ? (speedMps * 60 / cad) : 0;
            let vRatio = (stride > 0 && r.vertical_oscillation > 0) ? (r.vertical_oscillation / (stride * 1000) * 100) : 0;
+           let finalPwr = getPwr(r);
 
            const t = r.timestamp ? new Date(r.timestamp).toISOString() : "";
-           csv += `${t},${r.distance},${r.heart_rate},${cad},${r.stance_time_balance},${r.vertical_oscillation},${vRatio.toFixed(2)},${stride.toFixed(2)},${r.power},${r.speed}\n`;
+           csv += `${t},${r.distance},${r.heart_rate},${cad},${r.stance_time_balance},${r.vertical_oscillation},${vRatio.toFixed(2)},${stride.toFixed(2)},${finalPwr || ''},${r.speed}\n`;
         });
         setCsvContent(csv);
         setStatus('SUCCESS');
@@ -319,6 +361,11 @@ export default function App() {
         {status === 'SUCCESS' && data && (
           <div style={{ animation: 'fadeIn 0.5s', display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
+            {/* DEBUG MESSAGE */}
+            <div style={{ textAlign: 'center', marginBottom: '10px', fontSize: '12px', color: data.availability.hasPower ? STYLES.neonGreen : STYLES.neonRed }}>
+                {debugMsg}
+            </div>
+
             {/* KPI GRID */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
@@ -369,8 +416,9 @@ export default function App() {
              
             <ChartSection title="Longitud de Zancada" icon={Ruler} dataset={data.chartData} dataKey="stride" color={STYLES.neonOrange} unit="m" domain={[0.5, 1.5]} />
 
+            {/* GRÁFICA DE POTENCIA ACTIVADA */}
             {data.availability.hasPower && (
-              <ChartSection title="Potencia" icon={Zap} dataset={data.chartData} dataKey="pwr" color={STYLES.neonAmber} unit="w" />
+              <ChartSection title="Potencia (Watts)" icon={Zap} dataset={data.chartData} dataKey="pwr" color={STYLES.neonAmber} unit="w" />
             )}
 
             <div style={{ marginTop: '20px', padding: '20px', backgroundColor: 'rgba(0, 242, 255, 0.05)', borderRadius: '12px', border: `1px solid ${STYLES.neonBlue}` }}>
