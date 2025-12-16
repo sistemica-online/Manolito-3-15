@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { 
   UploadCloud, Activity, Heart, Zap, Footprints, FileText, 
-  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent
+  ArrowRight, Mountain, Gauge, Ruler, PlusCircle, Map, Percent, Timer
 } from 'lucide-react';
 
 // --- ESTILOS "M55 DARK" ---
@@ -23,6 +23,7 @@ const STYLES = {
   neonPurple: '#d946ef', 
   neonOrange: '#f97316', 
   neonMagenta: '#ec4899',
+  neonCyan: '#22d3ee',
   grid: '#334155'
 };
 
@@ -69,7 +70,7 @@ const parseGpxString = (gpxStr) => {
   return elevationData;
 };
 
-// --- LOGICA MATEMÁTICA AVANZADA FIT (ADAPTADA A TU ARCHIVO) ---
+// --- LOGICA MATEMÁTICA AVANZADA FIT ---
 const calculateMetrics = (records) => {
   if (!records || records.length === 0) return null;
 
@@ -80,63 +81,54 @@ const calculateMetrics = (records) => {
   let totalHR = 0, countHR = 0;
   let maxDistVal = 0;
   
+  // Detectores de disponibilidad
   let hasPower = false;
   let hasVertOsc = false;
   let hasAltitude = false;
-
-  const paceWindow = []; 
+  let hasGCT_ms = false;
 
   for (let i = 0; i < cleanRecords.length; i++) {
     const r = cleanRecords[i];
     if (r.heart_rate) { totalHR += r.heart_rate; countHR++; }
     if (r.vertical_oscillation && r.vertical_oscillation !== 0) hasVertOsc = true;
+    if (r.stance_time) hasGCT_ms = true;
 
-    // --- MAPPING DE CAMPOS (CORREGIDO) ---
-    // Potencia: RP_Power
-    // Velocidad: enhanced_speed (parece venir en km/h, 10.78 es razonable)
-    // Altitud: enhanced_altitude
+    // --- MAPPING DE DATOS ---
     
+    // 1. Potencia (Tu archivo usa RP_Power)
     let pwrVal = r.RP_Power || r.power; 
     if (pwrVal && pwrVal > 0) hasPower = true;
 
+    // 2. Altitud (Tu archivo usa enhanced_altitude)
     let altVal = r.enhanced_altitude || r.altitude;
     if (altVal !== undefined) hasAltitude = true;
 
+    // 3. Velocidad (Tu archivo usa enhanced_speed en km/h)
     let speedVal = r.enhanced_speed || r.speed; 
-    // OJO: Si enhanced_speed es 10.78, eso es km/h. Si fuera m/s sería un sprint olímpico (38km/h).
-    // Garmin nativo suele ser m/s, pero tu librería parece haberlo convertido o tu campo es km/h.
-    // Asumiremos km/h si el valor es > 7 (nadie corre a 7 m/s rodando suave).
     let speedKmh = speedVal;
-    if (speedVal < 7) { 
-        // Si es pequeño (ej: 2.5), asumimos m/s y pasamos a km/h
-        speedKmh = speedVal * 3.6; 
-    }
+    if (speedVal < 7) speedKmh = speedVal * 3.6; // fallback por si acaso viniera en m/s
 
+    // 4. Distancia
     let dKm = r.distance; 
     if (dKm > maxDistVal) maxDistVal = dKm;
 
-    // Calculo de Ritmo (min/km)
+    // 5. Ritmo (Pace)
     let paceMinKm = 0;
-    if (speedKmh > 1) { 
-       paceMinKm = 60 / speedKmh;
-    }
+    if (speedKmh > 1) paceMinKm = 60 / speedKmh;
 
-    // --- CORRECCIÓN CADENCIA ---
+    // 6. Cadencia (Corrección x2 para convertir RPM a SPM si es necesario)
     let realCadence = r.cadence;
-    if (realCadence > 0 && realCadence < 120) {
-        realCadence = realCadence * 2;
-    }
+    if (realCadence > 0 && realCadence < 120) realCadence = realCadence * 2;
 
-    // Zancada (m)
-    // Speed (m/min) = SpeedKmh * 1000 / 60
-    // Stride = Speed(m/min) / Cadence
+    // 7. Zancada (NATIVA vs CALCULADA)
     let strideLen = 0;
-    if (realCadence > 0 && speedKmh > 0) {
-      strideLen = (speedKmh * 1000 / 60) / realCadence;
+    if (r.step_length && r.step_length > 0) {
+        strideLen = r.step_length / 1000; // mm -> m
+    } else if (realCadence > 0 && speedKmh > 0) {
+        strideLen = (speedKmh * 1000 / 60) / realCadence; 
     }
 
-    // Ratio Vertical (%)
-    // Tu archivo ya trae 'vertical_ratio' calculado! Usémoslo si existe, si no lo calculamos.
+    // 8. Ratio Vertical (NATIVO vs CALCULADO)
     let vertRatio = r.vertical_ratio;
     if (!vertRatio && hasVertOsc && strideLen > 0 && r.vertical_oscillation > 0) {
         vertRatio = (r.vertical_oscillation / (strideLen * 1000)) * 100;
@@ -148,6 +140,7 @@ const calculateMetrics = (records) => {
         hr: r.heart_rate,
         cadence: realCadence, 
         gct: r.stance_time_balance, 
+        gct_ms: r.stance_time,
         vertOsc: r.vertical_oscillation,
         vRatio: vertRatio,
         pwr: pwrVal, 
@@ -174,7 +167,7 @@ const calculateMetrics = (records) => {
     avgHR: countHR ? Math.round(totalHR / countHR) : 0,
     decoupling,
     totalDist: maxDistVal,
-    availability: { hasPower, hasVertOsc, hasAltitude }
+    availability: { hasPower, hasVertOsc, hasAltitude, hasGCT_ms }
   };
 };
 
@@ -214,8 +207,8 @@ export default function App() {
         const processed = calculateMetrics(records);
         setData(processed);
 
-        // CSV FINAL (Mapeado correcto)
-        let csv = "Timestamp,Dist_km,HR,Cadence_SPM,GCT_Left,VertOsc_mm,VertRatio_Pct,Stride_m,Power_W,Alt_m,Speed_kmh\n";
+        // CSV LIMPIO (Sin temperatura)
+        let csv = "Timestamp,Dist_km,HR,Cadence_SPM,GCT_Left_Pct,GCT_Time_ms,VertOsc_mm,VertRatio_Pct,Stride_m,Power_W,Alt_m,Speed_kmh\n";
         
         records.forEach(r => {
            let cad = r.cadence;
@@ -225,14 +218,10 @@ export default function App() {
            let spd = r.enhanced_speed || r.speed;
            let alt = r.enhanced_altitude || r.altitude;
            let vr = r.vertical_ratio;
-
-           // Recalculo si falta algo
-           if (!vr && r.vertical_oscillation && spd && cad) {
-               // ... (lógica compleja, mejor dejamos vacío si no viene nativo para CSV raw)
-           }
+           let step = r.step_length ? r.step_length/1000 : 0;
 
            const t = r.timestamp ? new Date(r.timestamp).toISOString() : "";
-           csv += `${t},${r.distance},${r.heart_rate},${cad},${r.stance_time_balance},${r.vertical_oscillation},${vr},${r.step_length ? r.step_length/1000 : ''},${pwr},${alt},${spd}\n`;
+           csv += `${t},${r.distance},${r.heart_rate},${cad},${r.stance_time_balance},${r.stance_time},${r.vertical_oscillation},${vr},${step},${pwr},${alt},${spd}\n`;
         });
         setCsvContent(csv);
         setStatus('SUCCESS');
@@ -336,6 +325,7 @@ export default function App() {
         {status === 'SUCCESS' && data && (
           <div style={{ animation: 'fadeIn 0.5s', display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
+            {/* KPI GRID */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
               <div style={{ backgroundColor: STYLES.card, border: `1px solid ${STYLES.border}`, padding: '20px', borderRadius: '12px' }}>
                 <div style={{ fontSize: '10px', color: STYLES.textDim, fontWeight: 'bold' }}>DISTANCIA</div>
@@ -366,16 +356,18 @@ export default function App() {
             {gpxData ? (
                  <ChartSection title="Perfil de Elevación (Fuente: GPX)" icon={Mountain} dataset={gpxData} dataKey="alt" color={STYLES.text} unit="m" type="area" />
             ) : (data.availability.hasAltitude ? (
-                 <ChartSection title="Perfil de Elevación (Nativo FIT)" icon={Mountain} dataset={data.chartData} dataKey="alt" color={STYLES.text} unit="m" type="area" />
-            ) : (
-                 <div style={{ padding: '20px', border: `1px solid ${STYLES.border}`, borderRadius: '12px', textAlign: 'center', color: STYLES.textDim, fontSize: '12px' }}>
-                    Sin datos de altimetría. Carga un GPX para ver el perfil.
-                 </div>
-            ))}
+                 <ChartSection title="Perfil de Elevación" icon={Mountain} dataset={data.chartData} dataKey="alt" color={STYLES.text} unit="m" type="area" />
+            ) : null)}
 
             <ChartSection title="Ritmo (min/km)" icon={Gauge} dataset={data.chartData} dataKey="pace" color={STYLES.neonBlue} unit="min/km" domain={[4, 10]} yReversed={true} />
             <ChartSection title="Frecuencia Cardíaca" icon={Heart} dataset={data.chartData} dataKey="hr" color={STYLES.neonRed} unit="ppm" domain={['dataMin - 5', 'auto']} type="area" />
-            <ChartSection title="Simetría Sóleo (GCT Izq)" icon={Footprints} dataset={data.chartData} dataKey="gct" color={STYLES.neonGreen} unit="%" domain={[47, 53]} />
+            
+            <ChartSection title="Simetría Sóleo (GCT Balance Izq)" icon={Footprints} dataset={data.chartData} dataKey="gct" color={STYLES.neonGreen} unit="%" domain={[47, 53]} />
+            
+            {data.availability.hasGCT_ms && (
+              <ChartSection title="Tiempo de Contacto Suelo (GCT)" icon={Timer} dataset={data.chartData} dataKey="gct_ms" color={STYLES.neonCyan} unit="ms" domain={['dataMin - 10', 'dataMax + 10']} />
+            )}
+
             <ChartSection title="Cadencia (SPM)" icon={Activity} dataset={data.chartData} dataKey="cadence" color={STYLES.text} unit="spm" domain={[140, 200]} />
             
             {data.availability.hasVertOsc && (
@@ -387,13 +379,8 @@ export default function App() {
              
             <ChartSection title="Longitud de Zancada" icon={Ruler} dataset={data.chartData} dataKey="stride" color={STYLES.neonOrange} unit="m" domain={[0.5, 1.5]} />
 
-            {/* POTENCIA: AHORA SÍ LEEMOS RP_Power */}
-            {data.availability.hasPower ? (
+            {data.availability.hasPower && (
               <ChartSection title="Potencia (Watts)" icon={Zap} dataset={data.chartData} dataKey="pwr" color={STYLES.neonAmber} unit="w" />
-            ) : (
-               <div style={{ padding: '20px', border: `1px solid ${STYLES.border}`, borderRadius: '12px', textAlign: 'center', color: STYLES.textDim, fontSize: '12px' }}>
-                 No se encontró potencia (RP_Power) en este archivo.
-               </div>
             )}
 
             <div style={{ marginTop: '20px', padding: '20px', backgroundColor: 'rgba(0, 242, 255, 0.05)', borderRadius: '12px', border: `1px solid ${STYLES.neonBlue}` }}>
